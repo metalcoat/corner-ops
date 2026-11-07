@@ -1,3 +1,4 @@
+import { clientIp } from "@/lib/rate-limit";
 import { NextRequest, NextResponse } from "next/server";
 import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { getSql } from "@/lib/db";
@@ -11,8 +12,10 @@ import {
   listEmploymentEmployees,
   listEmploymentForms,
   saveEmploymentFormProfile,
+  sendOvertimeAgreements,
   type EmploymentFormProfile,
 } from "@/lib/employment-forms";
+import { sendStaffNotification } from "@/lib/staff-notifications";
 import { redactEmploymentSensitiveData } from "@/lib/sensitive-redaction";
 import { employerI9ValidationErrors } from "@/lib/i9-validation";
 import type { Business } from "@/lib/types";
@@ -24,7 +27,7 @@ function businessValue(value: unknown): Business {
 
 function clientMetadata(request: NextRequest) {
   return {
-    ipAddress: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "unknown",
+    ipAddress: clientIp(request),
     userAgent: request.headers.get("user-agent") || "unknown",
   };
 }
@@ -224,6 +227,16 @@ export async function POST(request: NextRequest) {
         employerSignature: String(body.employerSignature || ""),
       });
       return NextResponse.json({ form }, { status: 201 });
+    }
+
+    if (action === "send-overtime-agreements") {
+      const result = await sendOvertimeAgreements({ business, actor: session.email, employerSignature: session.displayName });
+      const employees = await listEmploymentEmployees(business);
+      for (const name of result.sent) {
+        const employee = employees.find((item) => item.name === name);
+        if (employee) await sendStaffNotification({ business, recipientEmployeeId: employee.id, actor: session.displayName, body: "Please sign your updated pay notice in the Corner Deli app → Forms. It adds how overtime is paid when you drive: each overtime hour at the rate for the job you're doing. Your pay rates don't change." }).catch((error) => console.error("[employment-forms] agreement notice failed", error));
+      }
+      return NextResponse.json(result, { status: 201 });
     }
 
     if (action === "complete-i9") {

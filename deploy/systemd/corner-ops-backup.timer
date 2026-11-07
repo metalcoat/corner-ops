@@ -1,0 +1,10 @@
+[Unit]
+Description=Back up Corner Ops every night after close
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 America/New_York
+Persistent=true
+Unit=corner-ops-backup.service
+
+[Install]
+WantedBy=timers.target

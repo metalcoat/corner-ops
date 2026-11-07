@@ -1,4 +1,5 @@
-import { del, put } from "@vercel/blob";
+import { listCoverageNeeded, requestShiftCoverage, volunteerForCoverage } from "@/lib/shift-coverage";
+import { del, put } from "@/lib/storage";
 import { getEmployeeSession, type EmployeeSession } from "@/lib/employee-auth";
 import { listDirectoryEmployees } from "@/lib/employee-directory-admin";
 import { employeePortalDashboard } from "@/lib/employee-portal-dashboard";
@@ -56,14 +57,16 @@ export async function GET() {
   try {
     const session = await getEmployeeSession();
     if (!session) return unauthorized();
-    const [dashboard, directory] = await Promise.all([
+    const [dashboard, directory, coverageNeeded] = await Promise.all([
       employeePortalDashboard(session),
       listDirectoryEmployees(session.business),
+      listCoverageNeeded(session).catch(() => []),
     ]);
     const byId = new Map(directory.map((employee) => [employee.id, employee]));
     const current = byId.get(session.employeeId);
     return Response.json({
       ...dashboard,
+      coverageNeeded,
       employee: {
         ...dashboard.employee,
         scheduleColor: current?.scheduleColor || "#64748B",
@@ -235,6 +238,12 @@ export async function POST(request: Request) {
         targetEmployeeId: body.targetEmployeeId ? String(body.targetEmployeeId) : null,
         note: body.note ? String(body.note) : "",
       }));
+    }
+    if (action === "coverage-request") {
+      return Response.json(await requestShiftCoverage(session, { shiftId: String(body.shiftId || ""), note: body.note ? String(body.note) : "", sickLeave: body.sickLeave === true }));
+    }
+    if (action === "coverage-volunteer") {
+      return Response.json(await volunteerForCoverage(session, String(body.id || "")));
     }
     if (action === "shift-response") {
       return Response.json(await respondToShiftRequest(session, {

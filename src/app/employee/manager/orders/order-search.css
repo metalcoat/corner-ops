@@ -1,0 +1,20 @@
+.osForm{display:grid;gap:10px;margin:12px 0;padding:12px;border:1px solid var(--mgr-line);border-radius:10px;background:var(--mgr-panel)}
+.osPresets{display:flex;flex-wrap:wrap;gap:6px}.mgrPage .osPresets .active,.mgrPage button.primary{background:var(--mgr-accent);border-color:var(--mgr-accent)}
+.osDates,.osFields{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px}
+.osForm label{display:grid;gap:4px;color:var(--mgr-muted);font-size:.78rem}
+.osForm input,.osForm select{min-height:42px;padding:8px 10px;border:1px solid var(--mgr-line);border-radius:8px;background:var(--mgr-bg);color:var(--mgr-text);font:inherit;font-size:1rem}
+.osActions{display:flex;gap:8px}
+.osResults{display:grid;gap:6px}
+.mgrPage .osResult{display:grid;gap:3px;width:100%;text-align:left}
+.osTop{display:flex;justify-content:space-between;gap:10px}.osResult small{color:var(--mgr-muted);overflow-wrap:anywhere}
+.osResult em{flex:none;font-style:normal;font-size:.85rem;text-transform:capitalize}.osResult em.bad{color:var(--mgr-bad)}.osResult em.good{color:var(--mgr-good)}
+.osSummary{margin-top:12px}.osSummary strong{text-transform:capitalize}
+.osTrail{display:grid;gap:0;margin:0;padding:0;list-style:none}
+.osTrail li{display:grid;grid-template-columns:150px 1fr;gap:10px;padding:8px 2px;border-bottom:1px solid #1e293b}
+.osTrail time{color:var(--mgr-muted);font-size:.82rem;font-variant-numeric:tabular-nums}.osTrail div{display:grid;gap:2px}.osTrail small{color:var(--mgr-muted);overflow-wrap:anywhere}
+@media(max-width:520px){.osTrail li{grid-template-columns:1fr;gap:2px}}
+.osMoney h3{margin:0;font-size:1rem}.osForm textarea{min-height:64px;padding:8px 10px;border:1px solid var(--mgr-line);border-radius:8px;background:var(--mgr-bg);color:var(--mgr-text);font:inherit;font-size:1rem;resize:vertical}
+.osMoney .osActions{flex-wrap:wrap}.mgrPage button.danger{background:#7f1d1d;border-color:#ef4444}
+.osDone{padding:10px;border:1px solid #22c55e;border-radius:8px;background:#052e16;color:#bbf7d0}
+.osConfirm{border-color:var(--mgr-accent)}.osSummaryLine{margin:0;font-size:1.05rem;font-weight:600}
+@media(max-width:520px){.osMoney .osActions button{flex:1 1 100%}}

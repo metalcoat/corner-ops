@@ -1,0 +1,14 @@
+[Unit]
+Description=Corner Ops: entrance camera door chime (relays walk-ins to the POS)
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=chris
+ExecStart=/usr/bin/env node /opt/corner-ops/runtime/tools/door-chime-detector.mjs
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,70 @@
+# Corner Deli TV greeter (Raspberry Pi 3 A+)
+
+`greeter.py` shows four slides full screen, 15 seconds each: the Corner Deli logo with the
+order-online QR code, the Ogdensburg weather (`GET /api/pos/greeter/weather`, a PNG the app
+draws from api.weather.gov, refreshed every 20 minutes, with animated weather on top), and a
+"Did you know?" fun fact (`GET /api/pos/greeter/fact?n=`; the list is `src/lib/greeter-facts.ts`),
+and the opening hours (`GET /api/pos/greeter/hours`; set in `src/lib/greeter-hours.ts`).
+It switches to "Welcome to Corner Deli!" with a spoken greeting for 8 seconds when the
+entrance camera records a walk-in (`GET /api/pos/greeter`). The pictures and the
+greeting are `public/greeter/idle.png`, `welcome.png` and `welcome.mp3` in the app;
+the Pi downloads them at start and every 6 hours and keeps the last copies.
+
+Chromium is not used: on this Pi (512 MB) it crashes. To change the screens, edit
+`src/app/pos/greeter/` and re-render the two PNGs from `/pos/greeter` (1920×1080).
+
+## Install (from the store server)
+
+Needs `python3-gi-cairo` (Cairo drawing from Python; not on a fresh Raspberry Pi OS):
+`sudo apt-get install -y python3-gi-cairo`. Without it the program stops at start-up.
+Before replacing a working copy, try the new one for a minute with
+`timeout 40 python3 /tmp/greeter_new.py --weather` and check its output for errors.
+
+```sh
+ssh -i ~/.ssh/corner_greeter_ed25519 chris@corner-greeter   # 192.168.6.217 on the TV Wi-Fi
+mkdir -p ~/greeter && scp tools/greeter-pi/greeter.py chris@corner-greeter:greeter/
+```
+
+`~/.config/labwc/autostart` on the Pi:
+
+```sh
+/usr/bin/kanshi &
+/usr/bin/lwrespawn /usr/bin/python3 /home/chris/greeter/greeter.py >> /home/chris/greeter/greeter.log 2>&1 &
+```
+
+Sound goes to HDMI (`wpctl set-default <HDMI sink>`); screen blanking is off
+(`raspi-config nonint do_blanking 1`). `python3 greeter.py --greet` shows the welcome
+once after start to check picture and sound.
+
+To load a new `greeter.py`, copy it over and stop only the Python process; `lwrespawn`
+starts it again within a second. Anchor the pattern: an unanchored `pkill -f greeter.py`
+also matches the `lwrespawn` shell and nothing restarts it until the Pi reboots.
+
+```sh
+pkill -f '^/usr/bin/python3 /home/chris/greeter/greeter.py'
+```
+
+## TV on and off (HDMI-CEC)
+
+`tv-power.sh on|off|status` switches the greeter TV over HDMI-CEC (`cec-ctl`, already on the Pi; user
+`chris` can use `/dev/cec0` through the `video` group). "on" wakes the TV, switches it to the Pi's input
+and retries up to three times. Schedule (store hours, from `src/lib/greeter-hours.ts`): on at 10:20 AM
+every day, off at 9:35 PM Sunday to Thursday and 10:35 PM Friday and Saturday. Install:
+
+Since 2026-10-22 the greeter runs on the TV's own Fire TV (`/pos/greeter/tv`, see `tools/menu-tvs/`), and the
+store server turns the TV on over the network. The Fire TV drops off the network while asleep, so
+the server can't always wake it; the Pi wakes it at 10:19 with `tv-power.sh wake` (the remote's power-on key over
+HDMI, which keeps the TV on its own input; `on` would switch it to the Pi) and the server then opens the greeter.
+Cron on the Pi since 2026-10-22: `19 10 * * * … tv-power.sh wake` plus the two "off" lines below.
+
+```sh
+scp tools/greeter-pi/tv-power.sh chris@corner-greeter:greeter/
+ssh chris@corner-greeter 'chmod +x ~/greeter/tv-power.sh && (crontab -l 2>/dev/null; cat) | crontab -' <<'CRON'
+20 10 * * *   /home/chris/greeter/tv-power.sh on  >> /home/chris/greeter/tv-power.log 2>&1
+35 21 * * 0-4 /home/chris/greeter/tv-power.sh off >> /home/chris/greeter/tv-power.log 2>&1
+35 22 * * 5,6 /home/chris/greeter/tv-power.sh off >> /home/chris/greeter/tv-power.log 2>&1
+CRON
+```
+
+The Pi's clock is America/New_York, so the times follow daylight saving. Check with
+`~/greeter/tv-power.sh status` (prints `on` or `standby`) and `~/greeter/tv-power.log`.

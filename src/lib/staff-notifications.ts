@@ -300,14 +300,13 @@ export async function publishScheduleWeek(input: {
   const hubUrl = employeeHubUrl(input.business);
   const pinLength = employeePinLength(input.business);
 
-  await sql`
-    INSERT INTO employee_messages (
-      id, business, sender_name, recipient_employee_id, message_type, body
-    ) VALUES (
-      ${crypto.randomUUID()}, ${input.business}, ${input.actor}, NULL, 'Announcement',
-      ${`${input.business} schedule ${scheduleVerb} for ${rangeLabel}. Open Employee Hub to review your shifts${openShifts.length ? ` and ${openShifts.length} open shift${openShifts.length === 1 ? "" : "s"}` : ""}.`}
-    )
-  `;
+  await saveHubMessage({
+    business: input.business,
+    actor: input.actor,
+    recipientEmployeeId: null,
+    recipientIds: contacts.map((employee) => employee.id),
+    body: `${input.business} schedule ${scheduleVerb} for ${rangeLabel}. Open Employee Hub to review your shifts${openShifts.length ? ` and ${openShifts.length} open shift${openShifts.length === 1 ? "" : "s"}` : ""}.`,
+  });
 
   const email = await deliverEmails({
     recipients: contacts,
@@ -391,6 +390,23 @@ export async function publishScheduleWeek(input: {
   };
 }
 
+/**
+ * Saves a management message where the Employee Hub's conversations read it: an announcement in the
+ * team conversation, a direct one in that employee's owner conversation (keys as in migration 0009),
+ * with the recipient snapshot that decides who can see it.
+ */
+async function saveHubMessage(input: { business: Business; actor: string; recipientEmployeeId: string | null; recipientIds: string[]; body: string }) {
+  const id = crypto.randomUUID();
+  const key = input.recipientEmployeeId ? `owner:${input.recipientEmployeeId}` : "team";
+  await getSql()`
+    INSERT INTO employee_messages (id, business, conversation_key, sender_name, recipient_employee_id, message_type, body)
+    VALUES (${id}, ${input.business}, ${key}, ${input.actor}, ${input.recipientEmployeeId}, ${input.recipientEmployeeId ? "Direct" : "Announcement"}, ${input.body})
+  `;
+  for (const employeeId of new Set(input.recipientIds)) {
+    await getSql()`INSERT INTO employee_message_recipients (message_id, employee_id) VALUES (${id}, ${employeeId}) ON CONFLICT (message_id, employee_id) DO NOTHING`;
+  }
+}
+
 export async function sendStaffNotification(input: {
   business: Business;
   recipientEmployeeId?: string | null;
@@ -407,14 +423,13 @@ export async function sendStaffNotification(input: {
     : contacts;
   if (input.recipientEmployeeId && !recipients[0]) throw new Error("Employee is not active for this location.");
 
-  await getSql()`
-    INSERT INTO employee_messages (
-      id, business, sender_name, recipient_employee_id, message_type, body
-    ) VALUES (
-      ${crypto.randomUUID()}, ${input.business}, ${input.actor}, ${input.recipientEmployeeId || null},
-      ${input.recipientEmployeeId ? "Direct" : "Announcement"}, ${body}
-    )
-  `;
+  await saveHubMessage({
+    business: input.business,
+    actor: input.actor,
+    recipientEmployeeId: input.recipientEmployeeId || null,
+    recipientIds: recipients.map((employee) => employee.id),
+    body,
+  });
 
   const hubUrl = employeeHubUrl(input.business);
   const pinLength = employeePinLength(input.business);

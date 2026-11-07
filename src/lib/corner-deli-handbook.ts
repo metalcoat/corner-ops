@@ -4,13 +4,15 @@ export type HandbookSection = {
   bullets?: string[];
 };
 
-export const CORNER_DELI_HANDBOOK_VERSION = "2026-08-20";
-export const CORNER_DELI_HANDBOOK_EFFECTIVE_DATE = "August 20, 2026";
+// Sections 3 (call-outs), 5 (breaks), 13 and 14 (alcohol, smoking) are drafts awaiting Chris's review of the wording. When approved,
+// drop "-draft" and the "(draft: owner review)" title notes. Any change to this file asks every employee to sign again.
+export const CORNER_DELI_HANDBOOK_VERSION = "2026-11-06-draft";
+export const CORNER_DELI_HANDBOOK_EFFECTIVE_DATE = "November 6, 2026";
 
 export const CORNER_DELI_HANDBOOK_TITLE = "Corner Deli Employee Handbook";
 
 export const CORNER_DELI_HANDBOOK_INTRO = [
-  "This handbook explains the day-to-day standards expected of Corner Deli employees. The goal is simple: serve customers well, work safely, communicate with the team, protect food quality, handle money honestly, and keep the operation moving efficiently.",
+  "This handbook explains the day-to-day standards expected of employees of Corner Deli (Mike's Corner Deli, LLC). The goal is simple: serve customers well, work safely, communicate with the team, protect food quality, handle money honestly, and keep the operation moving efficiently.",
   "No handbook can cover every situation. Management may make reasonable operational decisions as circumstances require, and policies may be updated when business needs or applicable law change. Employees will be asked to acknowledge material handbook revisions.",
 ];
 
@@ -29,14 +31,29 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     bullets: [
       "Report to work on time and ready to begin working at the scheduled start time.",
       "Employees are expected to work at a safe, efficient pace, move with purpose, multitask when appropriate, answer phones, and help coworkers rather than waiting for a task to be assigned when work is obviously available.",
-      "Schedule conflicts, call-offs, lateness, transportation problems, and other foreseeable issues must be communicated to management as early as possible. Problems that are not communicated in advance place the burden on the rest of the team and may result in discipline.",
-      "No-call/no-show absences, repeated lateness, or repeated failure to follow the call-off procedure may result in discipline up to and including termination.",
+      "Schedule conflicts, lateness, transportation problems, and other foreseeable issues must be communicated to management as early as possible. Problems that are not communicated in advance place the burden on the rest of the team and may result in discipline. Call-outs follow section 3.",
+      "Repeated lateness may result in discipline up to and including termination.",
       "During training, employees may be scheduled across different days and time periods so they can learn the operation. After training, management will generally try to maintain consistent schedules when business needs allow.",
       "Do not work off the clock, clock in or out for another employee, or ask another employee to do so. Report missed or incorrect punches promptly.",
     ],
   },
   {
-    title: "3. Employee meal benefit",
+    title: "3. Call-outs and finding coverage (draft: owner review)",
+    paragraphs: [
+      "We run with a small crew, so one missing person affects everyone working that day. Last-minute call-outs must be rare.",
+    ],
+    bullets: [
+      "If you can't work a scheduled shift, text the manager at least 4 hours before your shift starts. A text is fine; the store may not be open yet to answer the phone.",
+      "Right after you text, tap \"I need coverage\" on that shift in the Corner Deli app. It sends your shift to the whole team so a coworker can pick it up.",
+      "You still have the shift until a manager approves a coworker taking it. If nobody covers it, the manager decides; don't assume you're off.",
+      "If something comes up less than 4 hours before your shift, text the manager immediately and still post for coverage. Repeated late call-outs may result in discipline.",
+      "No-call/no-show (missing a shift without texting the manager before it starts) means immediate termination, except in an extreme outside emergency (such as a hospital visit or an accident) that the owner reviews.",
+      "Sick: if you're sick or need New York paid sick leave, text the manager as soon as you can. You don't have to find your own coverage to use sick leave, you don't have to say what the illness is, and you won't be disciplined for using sick leave you're entitled to. A doctor's note can only be asked for after 3 or more work days in a row.",
+      "Planned time off goes through Time off in the app, before the schedule is posted.",
+    ],
+  },
+  {
+    title: "4. Employee meal benefit",
     paragraphs: [
       "The employee meal is a company benefit and is separate from any meal period required by law.",
     ],
@@ -51,17 +68,17 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     ],
   },
   {
-    title: "4. Breaks and meal periods",
+    title: "5. Breaks and meal periods (draft: owner review)",
     bullets: [
-      "Meal periods and other breaks are scheduled around business conditions and applicable law. Exact timing may change during a rush.",
-      "Before leaving the work area for a break, give the manager and nearby coworkers a heads-up so coverage is maintained.",
-      "An unpaid meal period is unpaid only when the employee is fully relieved of work duties. Employees on an unpaid meal period are free to leave the premises unless a different lawful arrangement is specifically communicated.",
-      "If an employee is interrupted or performs work during an unpaid meal period, report it so the working time can be recorded and paid.",
-      "Short rest breaks, when provided, are treated as paid time when required by applicable law.",
+      "Your meal break is unpaid, so please clock out when it starts and clock back in when it ends. Meal breaks are the same as any other break: unpaid, and you clock out.",
+      "New York requires a meal break of at least 30 minutes on longer shifts (generally a shift of more than 6 hours that runs through 11 AM to 2 PM, and other times the law sets). Your manager schedules it, and the timing may move during a rush.",
+      "Other breaks aren't usually part of a shift, so check with your manager first if you need one. If a manager okays a short break of under 20 minutes, stay clocked in: the law requires short breaks to be paid.",
+      "Before you leave the work area for a break, give the manager and nearby coworkers a heads-up so the work is covered.",
+      "While you're clocked out for a meal break you are fully off duty and free to leave. If you're asked to work or get interrupted, clock back in or tell your manager so that time is paid.",
     ],
   },
   {
-    title: "5. Order taking and phone standards",
+    title: "6. Order taking and phone standards",
     bullets: [
       "Employees who take orders must learn the menu, including the normal sides and condiments that come with menu items.",
       "Do not read every optional modifier to the customer. Optional modifiers exist for customers who request a special order. Follow the normal ordering script and move to the next necessary question.",
@@ -72,8 +89,11 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     ],
   },
   {
-    title: "6. Delivery drivers",
+    title: "7. Delivery drivers",
     bullets: [
+      "Pay for driving (draft: owner review): driving hours are paid at the driver (tipped) rate shown on your New York pay notice, plus your delivery tips. Corner Deli takes the New York food service tip credit for those hours. If your driver wage plus delivery tips for a week come to less than the full minimum wage for your driving hours, Corner Deli pays the difference.",
+      "Overtime (draft: owner review): hours over 40 in a week are counted in the order you work them. Each overtime hour is paid at 1.5 times the rate for the job you're doing at that time: in-store at 1.5 times your regular rate, driving at the driving overtime rate on your pay notice ($18.70 in 2026 for a $10.70 driver rate). You agree to this when you sign your pay notice.",
+      "Time spent on non-delivery work (prep, dishes, the register) is paid at your regular rate. If you're doing that kind of work for more than a short stretch, tell the manager so the time is recorded correctly.",
       "The rear delivery cash drawer is set to $0 at the end of each night. Each delivery money bag is normally set to $60 at the beginning of the shift.",
       "Count the delivery bag before beginning the shift and report any discrepancy immediately so the starting balance is documented.",
       "The target $60 bag mix is $10 in tens (1 x $10), $25 in fives (5 x $5), $23 in ones (23 x $1), and $2 in quarters (8 x $0.25), subject to available change.",
@@ -86,7 +106,7 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     ],
   },
   {
-    title: "7. Cooks and kitchen production",
+    title: "8. Cooks and kitchen production",
     bullets: [
       "Read the entire order slip. Follow the manager's direction about how orders should be grouped and timed.",
       "Use fryer capacity efficiently. Multiple orders of the same product may be cooked in the same basket when doing so improves speed without sacrificing food quality, portion accuracy, allergen controls, or correct order assembly.",
@@ -97,7 +117,7 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     ],
   },
   {
-    title: "8. Food safety, sanitation, and illness reporting",
+    title: "9. Food safety, sanitation, and illness reporting",
     bullets: [
       "Follow all required handwashing, glove, utensil, temperature, storage, labeling, date-marking, and cross-contamination procedures.",
       "Clean as you go. Keep prep surfaces, equipment, floors, coolers, freezers, sinks, bathrooms, dining areas, and workstations in sanitary condition throughout the shift, not merely at closing.",
@@ -107,7 +127,7 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     ],
   },
   {
-    title: "9. Cash, discounts, comps, voids, tips, and honesty",
+    title: "10. Cash, discounts, comps, voids, tips, and honesty",
     bullets: [
       "Handle company money and customer payments accurately. Do not borrow from drawers, bags, deposits, or company funds.",
       "Do not create unauthorized discounts, free food, comps, voids, refunds, or other adjustments for yourself, friends, family, coworkers, or customers.",
@@ -117,7 +137,7 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     ],
   },
   {
-    title: "10. Workplace respect and conduct",
+    title: "11. Workplace respect and conduct",
     bullets: [
       "Treat coworkers, customers, vendors, and managers with basic respect. Fighting, threats, intimidation, bullying, or deliberate disruption of the workplace are prohibited.",
       "Discrimination, unlawful harassment, and retaliation are prohibited. Employees should report concerns promptly to a manager or the owner and may bypass any person who is involved in the concern.",
@@ -126,7 +146,7 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     ],
   },
   {
-    title: "11. Safety and emergencies",
+    title: "12. Safety and emergencies",
     bullets: [
       "Use knives, slicers, fryers, ovens, hot surfaces, cleaning chemicals, ladders, and other equipment only as trained and with required guards and protective equipment in place.",
       "Do not bypass safety devices or take shortcuts that create an unreasonable risk of injury.",
@@ -136,16 +156,30 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     ],
   },
   {
-    title: "12. Alcohol, drugs, smoking, and impairment",
+    title: "13. Alcohol and drugs: zero tolerance (draft: owner review)",
+    paragraphs: [
+      "Corner Deli has zero tolerance for alcohol at work. There are no warnings and no second chances under this policy.",
+    ],
     bullets: [
-      "Employees may not work while impaired by alcohol, illegal drugs, or any substance that makes them unable to perform their job safely.",
-      "Illegal drug possession, use, or distribution at work is prohibited.",
-      "Smoking and vaping are permitted only in locations and during times allowed by company policy and applicable law, and never in food-preparation or prohibited areas.",
-      "Employees using lawful medication that may affect safe job performance should follow any applicable safety instructions and raise work-safety concerns with management when necessary.",
+      "No drinking alcohol, having alcohol, or being under the influence of alcohol while on shift, anywhere on Corner Deli premises (inside, out front, the back lot, storage and coolers), or in the company vehicle.",
+      "The slightest hint of alcohol is enough. Smelling of alcohol, an open container in your work area, belongings or the company vehicle, or appearing impaired means immediate termination.",
+      "\"Only one drink\" or \"it was last night\" is not an exception. Come to work completely free of alcohol.",
+      "Using, having, selling or being impaired by illegal drugs, or being impaired by cannabis or any other substance, at work, on the premises or in the company vehicle is also grounds for immediate termination.",
+      "A manager who believes an employee may be impaired will remove them from work right away and will not let them drive a company vehicle or their own vehicle on a delivery.",
+      "If you take a lawful medication that could affect your ability to work safely or drive, tell a manager before your shift. You do not have to say what the medication is.",
     ],
   },
   {
-    title: "13. Appearance, hygiene, and readiness for work",
+    title: "14. No smoking or vaping (draft: owner review)",
+    bullets: [
+      "No smoking or vaping of any kind (cigarettes, cigars, e-cigarettes and vapes, or cannabis) inside the building, out front of the store, or in the company vehicle. This applies at all times: on shift, on breaks and off the clock.",
+      "\"Out front\" means the front entrance, the sidewalk and the front parking area: anywhere customers see or walk through.",
+      "If you smoke or vape on a break, go only where a manager says it is allowed, away from doors, and wash your hands before you handle food again.",
+      "Violations will result in discipline up to and including termination.",
+    ],
+  },
+  {
+    title: "15. Appearance, hygiene, and readiness for work",
     bullets: [
       "Arrive in clean, work-appropriate clothing and footwear suitable for the assigned job and restaurant safety requirements.",
       "Follow required hair-restraint, handwashing, glove, jewelry, and personal-hygiene rules for food service.",
@@ -153,7 +187,7 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     ],
   },
   {
-    title: "14. Phones, recordings, confidential information, and social media",
+    title: "16. Phones, recordings, confidential information, and social media",
     bullets: [
       "Personal phones should remain put away while actively working unless a manager authorizes a business or emergency use.",
       "Do not disclose customer addresses, phone numbers, payment information, employee private information, passwords, security information, or other confidential business records without authorization.",
@@ -162,7 +196,7 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     ],
   },
   {
-    title: "15. Discipline, repeated violations, and employment status",
+    title: "17. Discipline, repeated violations, and employment status",
     paragraphs: [
       "Corner Deli tries to handle ordinary problems reasonably, but repeated violations, serious misconduct, safety violations, dishonesty, attendance failures, or refusal to follow lawful work instructions may result in discipline up to and including termination. Depending on the seriousness of the conduct, management may skip intermediate steps.",
       "Unless a written agreement signed by the owner states otherwise, employment is at will to the extent permitted by New York law. This handbook is not a contract guaranteeing employment for any specific period and does not waive any right provided by law.",

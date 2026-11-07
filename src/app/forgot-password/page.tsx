@@ -1,6 +1,7 @@
 "use client";
 
 import { requestFailure } from "@/app/client-http";
+import { useSiteBrand } from "@/app/brand-context";
 import { FormEvent, useState } from "react";
 import "../ops/control-center.css";
 
@@ -10,6 +11,7 @@ async function message(response: Response): Promise<string> {
 }
 
 export default function ForgotPasswordPage() {
+  const brand = useSiteBrand();
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
 
@@ -34,7 +36,7 @@ export default function ForgotPasswordPage() {
 
   return <main className="controlPage" style={{ display: "grid", placeItems: "center" }}>
     <section className="controlCard" style={{ maxWidth: 540, width: "100%" }}>
-      <p className="eyebrow">Corner Ops account recovery</p>
+      <p className="eyebrow">{brand.name} account recovery</p>
       <h1>Reset your password</h1>
       <p>Enter the email used for your owner, co-owner, accountant, manager, or viewer account.</p>
       <form className="controlForm" onSubmit={submit}>

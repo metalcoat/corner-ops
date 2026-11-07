@@ -141,7 +141,6 @@ export function ensureWeatherSchema(): Promise<void> {
   if (!weatherSchemaPromise) {
     weatherSchemaPromise = (async () => {
       await ensureSchema();
-      const sql = getSql();
     })().catch((error) => {
       weatherSchemaPromise = null;
       throw error;
@@ -333,8 +332,6 @@ async function dailyBusinessRows(business: Business, start: string, end: string)
     result.set(date, created);
     return created;
   };
-  const startInstantSql = getSql()`(${start}::date + TIME '04:00') AT TIME ZONE ${TIME_ZONE}`;
-  const endInstantSql = getSql()`(${end}::date + TIME '04:00') AT TIME ZONE ${TIME_ZONE}`;
 
   if (business === "Tiki") {
     await ensureSquareControlSchema();

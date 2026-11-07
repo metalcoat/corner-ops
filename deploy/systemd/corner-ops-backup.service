@@ -1,0 +1,10 @@
+[Unit]
+Description=Corner Ops nightly database and uploads backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=chris
+WorkingDirectory=/opt/corner-ops
+ExecStart=/opt/corner-ops/runtime/deploy/backup-db.sh

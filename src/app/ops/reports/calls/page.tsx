@@ -90,7 +90,7 @@ export default function DeliCallsPage() {
     </header>
 
     {notice && <div className="noticeBar">{notice}</div>}
-    {payload && !payload.settings.concurrencyConfigured && <div className="noticeBar callsWarning">Add THREE_CX_DELI_EXTENSIONS in Vercel to calculate whether other Deli lines were active at the drop time.</div>}
+    {payload && !payload.settings.concurrencyConfigured && <div className="noticeBar callsWarning">Add THREE_CX_DELI_EXTENSIONS to the app environment to calculate whether other Deli lines were active at the drop time.</div>}
 
     <section className="controlCard callsToolbar">
       <label>Start date<input type="date" value={start} onChange={(event) => setStart(event.target.value)} /></label>

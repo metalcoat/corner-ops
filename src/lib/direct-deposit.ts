@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
-import { ensureSchema, getSql } from "@/lib/db";
 import { requireStrongSecret } from "@/lib/secret-strength";
+import { ensureSchema, getSql } from "@/lib/db";
 import { getEmploymentFormProfile } from "@/lib/employment-forms";
 import { cornerOpsBaseUrl, ownerNotificationEmails, sendTransactionalEmail } from "@/lib/transactional-email";
 import type { Business } from "@/lib/types";
@@ -45,7 +45,6 @@ export function ensureDirectDepositSchema(): Promise<void> {
   if (!schemaPromise) {
     schemaPromise = (async () => {
       await ensureSchema();
-      const sql = getSql();
     })().catch((error) => {
       schemaPromise = null;
       throw error;
@@ -55,7 +54,10 @@ export function ensureDirectDepositSchema(): Promise<void> {
 }
 
 function encryptionKey(): Buffer {
-  const secret = requireStrongSecret(process.env.EMPLOYMENT_FORMS_ENCRYPTION_KEY, "EMPLOYMENT_FORMS_ENCRYPTION_KEY");
+  const secret = requireStrongSecret(
+    process.env.EMPLOYMENT_FORMS_ENCRYPTION_KEY,
+    "EMPLOYMENT_FORMS_ENCRYPTION_KEY",
+  );
   return createHash("sha256").update(secret, "utf8").digest();
 }
 
@@ -130,7 +132,7 @@ async function notifyOwner(input: {
       subject: input.subject,
       text: [
         ...input.lines,
-        base ? `Review securely: ${base}/ops/direct-deposit` : "Open People > Direct deposit onboarding to review securely.",
+        base ? `Review securely: ${base}/ops/people/paperwork/direct-deposit` : "Open People > Paperwork > Direct deposit to review securely.",
         "",
         "Full routing and account numbers are intentionally excluded from email.",
       ].join("\n"),

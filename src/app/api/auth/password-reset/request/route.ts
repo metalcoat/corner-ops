@@ -1,10 +1,11 @@
+import { clientIp } from "@/lib/rate-limit";
 import { NextRequest, NextResponse } from "next/server";
 import { requestAppPasswordReset } from "@/lib/credential-resets";
 
 export const runtime = "nodejs";
 
 function ip(request: NextRequest): string {
-  return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "unknown";
+  return clientIp(request);
 }
 
 export async function POST(request: NextRequest) {

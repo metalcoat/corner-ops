@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">At the Docks</title>
+  <rect width="512" height="512" rx="88" fill="#132d3c"/>
+  <path d="M76 411h360" stroke="#8bc9d5" stroke-width="12" stroke-linecap="round"/>
+  <g fill="#fff" font-family="Arial, Helvetica, sans-serif" font-weight="800" text-anchor="middle">
+    <text x="256" y="175" font-size="84" letter-spacing="7">AT THE</text>
+    <text x="256" y="293" font-size="103" letter-spacing="3">DOCKS</text>
+  </g>
+</svg>

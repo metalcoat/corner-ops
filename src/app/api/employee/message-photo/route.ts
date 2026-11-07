@@ -1,4 +1,5 @@
-import { get } from "@vercel/blob";
+import { safeImageHeaders } from "@/lib/safe-image-response";
+import { get } from "@/lib/storage";
 import { getEmployeeSession } from "@/lib/employee-auth";
 import { employeeMessageAttachment } from "@/lib/message-attachments";
 import { apiError, unauthorized } from "@/lib/http";
@@ -28,7 +29,7 @@ export async function GET(request: Request) {
     if (result.statusCode !== 200 || !result.stream) return new Response("Photo not found.", { status: 404 });
     return new Response(result.stream, {
       headers: {
-        "Content-Type": result.blob.contentType || attachment.contentType,
+        ...safeImageHeaders(result.blob.contentType || attachment.contentType),
         "Content-Disposition": `inline; filename="${attachment.fileName.replaceAll('"', '')}"`,
         "Content-Length": String(result.blob.size || attachment.size),
         "X-Content-Type-Options": "nosniff",

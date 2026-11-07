@@ -1,0 +1,19 @@
+.greeter{--greeter-bg:#0f1d14;--greeter-ink:#fdf8ec;--greeter-accent:#f2b632;--greeter-muted:#c9d6c8}
+html:has(.greeter),body:has(.greeter){margin:0;height:100%;background:#0f1d14;overflow:hidden;cursor:none}
+.greeter{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(ellipse at 50% 35%,#1f4a2c 0%,var(--greeter-bg) 70%);color:var(--greeter-ink);font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+.greeter section{position:absolute;inset:0;display:grid;place-items:center;align-content:center;gap:4vh;text-align:center;transition:opacity .6s ease,transform .6s ease}
+.greeterLogo{width:min(42vh,42vw);height:auto;border-radius:50%;box-shadow:0 2vh 6vh rgba(0,0,0,.45)}
+.greeterOrder{display:flex;align-items:center;gap:3vw;padding:2.4vh 3vw;border-radius:2vh;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18)}
+.greeterQr{width:22vh;height:22vh;padding:1vh;border-radius:1.2vh;background:#fff}
+.greeterQr svg{display:block;width:100%;height:100%}
+.greeterOrder div:last-child{display:grid;gap:1vh;text-align:left}
+.greeterOrder strong{font-size:5.2vh;font-weight:800;letter-spacing:.01em}
+.greeterOrder span{font-size:3vh;color:var(--greeter-muted)}
+.greeterHello{opacity:0;transform:scale(.96);pointer-events:none}
+.greeterHello img{width:min(30vh,30vw);border-radius:50%}
+.greeterHello h1{margin:0;font-size:11vh;line-height:1.05;font-weight:900;color:var(--greeter-accent);text-shadow:0 .6vh 2.4vh rgba(0,0,0,.4)}
+.greeterHello p{margin:0;font-size:5vh;color:var(--greeter-ink)}
+.greeterWelcome .greeterIdle{opacity:0;transform:scale(1.03)}
+.greeterWelcome .greeterHello{opacity:1;transform:none}
+.greeterOffline{position:absolute;right:2vh;bottom:2vh;width:1.6vh;height:1.6vh;border-radius:50%;background:#d33}
+@media (prefers-reduced-motion:reduce){.greeter section{transition:none}}

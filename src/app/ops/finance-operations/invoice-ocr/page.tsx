@@ -252,7 +252,7 @@ export default function InvoiceOcrPage() {
 
     {notice && <div className="noticeBar">{notice}</div>}
     {configuration && !configuration.configured && <section className="controlCard invoiceConfigError">
-      <div><p className="eyebrow">Configuration required</p><h2>Invoice OCR is not ready</h2><p>Add the Azure Document Intelligence endpoint and key to Vercel before attempting OCR.</p></div>
+      <div><p className="eyebrow">Configuration required</p><h2>Invoice OCR is not ready</h2><p>Add the Azure Document Intelligence endpoint and key to the app environment before attempting OCR.</p></div>
       <code>{configuration.missing.join("\n")}</code>
     </section>}
 

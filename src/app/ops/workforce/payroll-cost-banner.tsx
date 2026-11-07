@@ -133,7 +133,7 @@ export default function PayrollCostBanner() {
         <span>Gross scheduled wages before employer taxes, tips, reimbursements, and payroll fees. Edit employee rates from the Employees page.</span>
       </div>
       <div className="payrollEstimateControls">
-        <a href="/ops/employees">Employees</a>
+        <a href="/ops/people/team">Team</a>
         <button type="button" onClick={() => setWeekStart((value) => addDays(value, -7))}>← Prior week</button>
         <button type="button" onClick={() => setWeekStart(monday(new Date()))}>Current week</button>
         <button type="button" onClick={() => setWeekStart((value) => addDays(value, 7))}>Next week →</button>
