@@ -42,6 +42,8 @@ Raise `versionCode` in `AndroidManifest.xml` for each update.
 The greeter page asks the app (`window.CornerDeliTv`) to play the season's playlist from `src/lib/greeter-playlists.ts`.
 The app plays it in a hidden second WebView running YouTube's TV site (`youtube.com/tv`, identifying as the Fire TV
 YouTube app), signed in to the store's YouTube Premium account, so no ads play. It pauses for each spoken welcome.
+If YouTube stops on its own "Something went wrong / The YouTube app needs to restart" screen, the app reloads it
+(at most once a minute; version 1.7, 2026-11-07).
 
 Pairing was done once on 2026-10-22. To pair again (new account, or signed out):
 

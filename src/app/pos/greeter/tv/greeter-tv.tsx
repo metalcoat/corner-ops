@@ -63,6 +63,7 @@ export default function GreeterTv({ qrSvg, orderUrl, season, followSeason, ribbo
   const volume = useRef({ music: 0.13, greeting: 1 });
   const [musicVolume, setMusicVolume] = useState(0.13);
   const greeting = useRef(false); // true while the welcome is on screen (music paused)
+  const loadedBuild = useRef(""); // the server build this page came from
   useEffect(() => { music.current?.volume(musicVolume); }, [musicVolume]);
   // In the Corner Deli display app the app plays the music, so the page shows no player.
   const [inApp, setInApp] = useState(false);
@@ -203,11 +204,16 @@ export default function GreeterTv({ qrSvg, orderUrl, season, followSeason, ribbo
       try {
         const response = await fetch("/api/pos/greeter", { cache: "no-store" });
         if (!response.ok) throw new Error(String(response.status));
-        const { latest, volumes, season: liveSeason } = (await response.json()) as { latest: { id: number; ageSeconds: number } | null; volumes?: { music: number; greeting: number }; season?: string };
+        const { latest, volumes, season: liveSeason, build } = (await response.json()) as { latest: { id: number; ageSeconds: number } | null; volumes?: { music: number; greeting: number }; season?: string; build?: string };
         if (stopped) return;
         setOffline(false);
         // A holiday ends at store midnight, not at the 4 AM reload.
         if (followSeason && liveSeason && liveSeason !== season) { window.location.reload(); return; }
+        // A new build on the server (a deploy): reload to pick it up, but never in the middle of a welcome.
+        if (build && build !== "@") {
+          if (!loadedBuild.current) loadedBuild.current = build;
+          else if (build !== loadedBuild.current && !greeting.current) { window.location.reload(); return; }
+        }
         if (volumes) {
           volume.current = { music: volumes.music / 100, greeting: volumes.greeting / 100 };
           setMusicVolume(volume.current.music);

@@ -47,7 +47,13 @@ final class MusicPlayer {
         + "document.dispatchEvent(new KeyboardEvent('keydown',e));document.dispatchEvent(new KeyboardEvent('keyup',e));return;}"
         + "if(list&&location.hash.indexOf('watch')<0&&t.indexOf('Watch as guest')<0){location.hash='#/watch?list='+list;}})('%s')";
 
+    /** YouTube's TV site sometimes stops on "Something went wrong / The YouTube app needs to restart" and never recovers (2026-11-07). */
+    private static final String CRASHED_JS = "(function(){var t=document.body?document.body.innerText:'';"
+        + "return t.indexOf('needs to restart')>=0||t.indexOf('Something went wrong')>=0;})()";
+    private static final long RESTART_GAP_MS = 60_000;
+
     final WebView view;
+    private long restartedAt = 0;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private String playlist = "";
     private double volume = 0.35;
@@ -78,6 +84,14 @@ final class MusicPlayer {
         handler.postDelayed(new Runnable() {
             @Override public void run() {
                 if (!playlist.isEmpty() && view.getVisibility() != View.VISIBLE) { // hands off while pairing
+                    // YouTube's own error screen: start it again (at most once a minute).
+                    view.evaluateJavascript(CRASHED_JS, crashed -> {
+                        long now = System.currentTimeMillis();
+                        if ("true".equals(crashed) && now - restartedAt > RESTART_GAP_MS) {
+                            restartedAt = now;
+                            view.loadUrl("https://www.youtube.com/tv?r=" + now + "#/watch?list=" + playlist);
+                        }
+                    });
                     view.evaluateJavascript(String.format(RESUME_JS, playlist), null);
                     view.evaluateJavascript(String.format(VOLUME_JS, volume), null);
                     view.evaluateJavascript(paused
