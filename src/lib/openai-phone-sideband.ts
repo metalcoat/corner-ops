@@ -202,11 +202,20 @@ async function answerPendingNewItem(
   pending: Record<string, any>,
   activeName: string,
 ) {
-  if (input.operation !== "add" || !pending.actualMenuItemId) return { ...input };
+  if (!pending.actualMenuItemId || !["add", "read"].includes(input.operation)) return { ...input };
   const wanted = [pending.customerRequest, activeName].filter(Boolean).map((name) => cartKey(String(name)));
-  const index = input.items.findIndex((item) => wanted.includes(cartKey(item.name)));
-  if (index < 0) return { ...input };
-  const item = input.items[index];
+  const index = input.operation === "add" ? input.items.findIndex((item) => wanted.includes(cartKey(item.name))) : -1;
+  // The answer can also come as a bare read or an add of other items (dev call 2026-11-07 20:17: "Italian" and
+  // "barbecue" were sent as reads, so the salad and wings never went on): the item is rebuilt from the question.
+  const rebuilt = index < 0;
+  if (rebuilt && !String(pending.customerRequest || "").trim()) return { ...input };
+  const catalog = await menuCatalog("Corner Deli", new Date(), String(rebuilt ? pending.customerRequest : input.items[index].name));
+  const menuItem = catalog.flatMap((category) => category.items || []).find((row: any) => row.id === pending.actualMenuItemId);
+  if (rebuilt && !menuItem) return { ...input };
+  const variantName = String(menuItem?.variants?.find((row: any) => row.id === pending.actualVariantId)?.name || pending.collectedVariant || "");
+  const item: SpokenOrderItem = rebuilt
+    ? { name: String(menuItem!.name), ...(variantName ? { variant: variantName } : {}), quantity: Math.max(1, Number(pending.collectedQuantity || 1)), modifiers: [] }
+    : input.items[index];
   const text = ` ${spokenKey(input.customerText)} `;
   const answered: SpokenOrderItem["modifiers"] = [];
   const questions: string[] = [...(Array.isArray(pending.resolvedQuestions) ? pending.resolvedQuestions.map(String) : [])];
@@ -218,8 +227,6 @@ async function answerPendingNewItem(
       questions.push("hamburger_steak_toppings");
     }
   } else {
-    const catalog = await menuCatalog("Corner Deli", new Date(), item.name);
-    const menuItem = catalog.flatMap((category) => category.items || []).find((row: any) => row.id === pending.actualMenuItemId);
     for (const groupName of (pending.missingRequiredFields || []).map(String)) {
       const group = menuItem?.modifiers?.find((row: any) => row.name === groupName);
       if (!group) continue;
@@ -238,7 +245,16 @@ async function answerPendingNewItem(
   const modifiers = [...(item.modifiers || [])];
   for (const modifier of [...(carried || []), ...(answered || [])])
     if (!modifiers.some((row) => modifierKey(row.name) === modifierKey(modifier.name))) modifiers.push(modifier);
+  if (rebuilt && !answered?.length && questions.length === (Array.isArray(pending.resolvedQuestions) ? pending.resolvedQuestions.length : 0)) return { ...input };
   if (modifiers.length === (item.modifiers || []).length && !questions.length) return { ...input };
+  if (rebuilt) {
+    return {
+      ...input,
+      operation: "add" as CartOperation,
+      items: [...(input.operation === "add" ? input.items : []), { ...item, modifiers }],
+      resolvedPendingQuestions: questions,
+    };
+  }
   return {
     ...input,
     items: input.items.map((row, i) => (i === index ? { ...item, modifiers } : row)),

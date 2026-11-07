@@ -419,6 +419,7 @@ const tools = [
     annotations: { readOnlyHint: false },
   },
 ];
+const sameName = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 const reply = (id: Rpc["id"], result: unknown) =>
   isoJson({ jsonrpc: "2.0", id, result });
 const failure = (
@@ -645,7 +646,7 @@ async function callTool(rpc: Rpc) {
       });
   }
   // Answers already given for an item that is still waiting on another question (applyPendingModifierAnswer).
-  let carried: { items: Array<{ name: string; modifiers?: unknown[] }>; questions: string[] } | null = null;
+  let carried: { items: Array<{ name: string; modifiers?: unknown[]; quantity?: number; variant?: string }>; questions: string[] } | null = null;
   const started = Date.now(),
     requestId = randomUUID(),
     provider = String(call.selected_provider || "openai"),
@@ -728,13 +729,12 @@ async function callTool(rpc: Rpc) {
         });
     }
     delete args.serviceChangeRequested;
-    const result =
-      requestedName === "price_order"
-        ? await priceSpokenOrder({
+    const priceCart = (items: typeof phoneItems) =>
+      priceSpokenOrder({
             business: "Corner Deli",
             actor,
             service: serviceType(args.serviceType),
-            items: phoneItems,
+            items,
             orderId: call.order_id || null,
             callerPhone: String(args.callerPhone || call.caller_phone || ""),
             customerId:
@@ -755,7 +755,25 @@ async function callTool(rpc: Rpc) {
               ...(pendingApplied?.resolvedPendingQuestions || []),
             ],
             customerText: String(args.customerText || ""),
-          })
+          });
+    // Several new items where one still needs an answer: the others go in now and the question is asked (dev call
+    // 2026-11-07 20:16: 30 wings rode along with a Hamburger Steak still waiting on mashed size, so they never went on).
+    let partialFollowUp: { error: AiToolError; held: { name: string; modifiers?: unknown[]; quantity?: number; variant?: string } } | null = null;
+    const pricePhoneOrder = () =>
+      priceCart(phoneItems).catch(async (error: unknown) => {
+        const added = pendingApplied?.operation === "add" ? pendingApplied.items : [];
+        const pendingRequest = sameName(String((error instanceof AiToolError && (error.details.pendingItem as { customerRequest?: string } | undefined)?.customerRequest) || ""));
+        if (!(error instanceof AiToolError) || error.code !== "FOLLOW_UP_REQUIRED" || added.length < 2 || !pendingRequest) throw error;
+        const held = added.filter((item) => sameName(String(item.name)) === pendingRequest);
+        const rest = added.filter((item) => sameName(String(item.name)) !== pendingRequest);
+        if (held.length !== 1 || !rest.length) throw error;
+        const priced = await priceCart(await incrementalSpokenCart(call.order_id ? String(call.order_id) : null, "add", "", rest, String(args.customerText || "")));
+        partialFollowUp = { error, held: held[0] as { name: string; modifiers?: unknown[]; quantity?: number; variant?: string } };
+        return priced;
+      });
+    const result =
+      requestedName === "price_order"
+        ? await pricePhoneOrder()
         : await executeAiOrderingTool(name, args, "Corner Deli", actor).then((value) =>
             // The full menu payload was ~54 KB per search: costly on every later turn, and once rejected by
             // Gemini (1007) in a replay. The phone model only needs names, sizes, prices and options.
@@ -835,6 +853,20 @@ async function callTool(rpc: Rpc) {
       );
       if (compact.wingReadback) (result as Record<string, any>).wingReadback = compact.wingReadback;
     }
+    if (partialFollowUp && result && typeof result === "object") {
+      const { error, held } = partialFollowUp as { error: AiToolError; held: { name: string; modifiers?: unknown[]; quantity?: number; variant?: string } };
+      Object.assign(result as Record<string, any>, {
+        required_follow_up: error.message,
+        pending_item: {
+          ...(error.details.pendingItem as Record<string, unknown>),
+          question: error.message,
+          ...(held.modifiers?.length ? { collectedModifiers: held.modifiers } : {}),
+          collectedQuantity: Number(held.quantity || 1),
+          collectedVariant: String(held.variant || ""),
+        },
+        held_back: `${held.name} isn't on the order yet; everything else was added.`,
+      });
+    }
     // A pizza added with nothing on it is asked about (dev call 2026-11-07 18:34: "two jumbo pizzas" went in plain and
     // nobody asked), unless the caller said cheese or plain, or named a topping (the order checker handles a missed one).
     if (requestedName === "price_order" && String(args.operation || "") === "add" && result && typeof result === "object" && !(result as Record<string, any>).required_follow_up) {
@@ -861,10 +893,21 @@ async function callTool(rpc: Rpc) {
       const address = (await getSql()`SELECT line1,line2 FROM ordering_order_delivery_addresses WHERE order_id=${orderId}`)[0];
       if (address) (result as Record<string, any>).deliveryTo = [address.line1, address.line2].filter(Boolean).join(", ");
     }
+    // An open question about an item not in the cart yet stays open through a read or an add of other items (dev call
+    // 2026-11-07 20:17: a read after "What sauce?" cleared it and the wings were never added).
+    const openPending = call.pending_item && typeof call.pending_item === "object" ? (call.pending_item as Record<string, any>) : null;
+    const pendingName = sameName(String(openPending?.customerRequest || ""));
+    const keepPending =
+      requestedName === "price_order" &&
+      Boolean(openPending?.actualMenuItemId && pendingName) &&
+      !(pendingApplied?.items || []).some((item) => sameName(String(item.name)) === pendingName || sameName(String(item.name)) === sameName(String(openPending?.category || "")));
+    const nextPending = (result as Record<string, any>).pending_item || (keepPending ? openPending : null);
+    if (keepPending && !(result as Record<string, any>).pending_item && !(result as Record<string, any>).required_follow_up && openPending?.question)
+      (result as Record<string, any>).still_open = `${openPending.customerRequest} isn't on the order yet: ask “${openPending.question}”`;
     if (orderId) {
       resolvedQuestions.delete("cold_sub_condiments");
       resolvedQuestions.delete("cold_sub_vegetables");
-      await getSql()`UPDATE ordering_call_sessions SET order_id=${orderId},pending_item=${(result as Record<string, any>).pending_item ? JSON.stringify((result as Record<string, any>).pending_item) : null}::jsonb,deferred_required_fields=${JSON.stringify([...resolvedQuestions])}::jsonb,updated_at=NOW() WHERE id=${call.id}`;
+      await getSql()`UPDATE ordering_call_sessions SET order_id=${orderId},pending_item=${nextPending ? JSON.stringify(nextPending) : null}::jsonb,deferred_required_fields=${JSON.stringify([...resolvedQuestions])}::jsonb,updated_at=NOW() WHERE id=${call.id}`;
     }
     await auditAiTool({
       business: "Corner Deli",
@@ -911,13 +954,15 @@ async function callTool(rpc: Rpc) {
     // The voice model often re-sends the item bare with just the answer, so what it already said about this item
     // (toppings, earlier answers) is kept on the pending question.
     const sameItem = carried?.items.filter(
-      (item) => item.name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() === String((known.details.pendingItem as { customerRequest?: string } | undefined)?.customerRequest || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(),
+      (item) => sameName(item.name) === sameName(String((known.details.pendingItem as { customerRequest?: string } | undefined)?.customerRequest || "")),
     );
     const collected = sameItem?.length === 1 ? sameItem[0].modifiers || [] : [];
     const pendingItem = known.details.pendingItem
       ? {
           ...known.details.pendingItem,
+          question: known.message,
           ...(collected.length ? { collectedModifiers: collected } : {}),
+          ...(sameItem?.length === 1 ? { collectedQuantity: Number((sameItem[0] as { quantity?: number }).quantity || 1), collectedVariant: String((sameItem[0] as { variant?: string }).variant || "") } : {}),
           ...(sameItem?.length === 1 && carried?.questions.length ? { resolvedQuestions: carried.questions } : {}),
         }
       : null;

@@ -22,6 +22,9 @@ const REPLAYS: Array<{ callId: string; expect: Expect | "either"; what: string; 
   { callId: "036f046f-34f0-4425-b7df-cad50396f543", expect: "adds", what: "15:10 readback: 30 mild wings with blue cheese and celery missing", untilAssistant: /^Okay, I have a jumbo pizza/, dropLines: /^Wings$/, mustAdd: /^Wings$/ },
   // Same call earlier: pepperoni rejected ("We don't have pepperoni on the menu"), the pizza went in plain.
   { callId: "036f046f-34f0-4425-b7df-cad50396f543", expect: "adds", what: "15:10 pepperoni missing on the jumbo pizza", untilAssistant: /^We don't have pepperoni/, dropLines: /^(?:Wings|Turkey)$/, dropModifiers: /^Pepperoni$/ },
+  // 2026-11-07 20:15: "30 Wayne medium with blue cheese and celery" (Gemini's add of 30 Wings failed); Claude said
+  // "not sure" until it could see that failed attempt.
+  { callId: "ffeb50b5-0004-4b9a-a587-796a9c75fa28", expect: "adds", what: "20:15 garbled '30 Wayne' wings never went on", untilAssistant: /^Got it\. And I've got the pepperoni/, dropLines: /Cheesy|Hamburger/, mustAdd: /^Wings$/ },
   { callId: "b08100aa-0cbb-41f6-83ab-cb11107c784a", expect: "either", what: "05:00 garbled Turkey Big Boss: must not lose it" },
   // BBQ isn't on the menu: Claude may rightly leave these as a note for Gemini to ask about.
   { callId: "af3c7c7f-fbce-4100-b478-0ee861779a01", expect: "either", what: "BBQ rejected: the 30 wings never got on the order", mustAdd: /wings/i },

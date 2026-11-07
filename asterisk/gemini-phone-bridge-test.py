@@ -401,7 +401,14 @@ async def main():
         [transcript("a big boss no tomato"), tool_call("a", ADD), "WAIT_TOOL_RESPONSE", AUDIO, DONE] + ["SLEEP"] * 14,
         [{"ok": True}], mismatch,
     )
-    check("a pending note reaches an idle Gemini as a private nudge", any(n == "orderCheckNote" and d.get("via") == "nudge" for n, d in log["events"]), log["events"])
+    check("by default a note never goes in as its own turn (dev call 2026-11-07 18:57)", not any(n == "orderCheckNote" and d.get("via") == "nudge" for n, d in log["events"]), log["events"])
+    gp.CHECK_IDLE_NUDGE = True
+    log = await run(
+        [transcript("a big boss no tomato"), tool_call("a", ADD), "WAIT_TOOL_RESPONSE", AUDIO, DONE] + ["SLEEP"] * 14,
+        [{"ok": True}], mismatch,
+    )
+    check("with GEMINI_ORDER_CHECK_NUDGE a pending note reaches an idle Gemini", any(n == "orderCheckNote" and d.get("via") == "nudge" for n, d in log["events"]), log["events"])
+    gp.CHECK_IDLE_NUDGE = False
 
     # Claude fixed the cart itself (AI_PHONE_CLAUDE_AUTOFIX, 2026-11-07): Gemini hears what changed even when a
     # newer cart change superseded that check, and a fully fixed cart leaves no mismatch note.
@@ -484,7 +491,7 @@ async def main():
 
     # The caller keeps talking but Gemini transcribes nothing (dev test call 2026-11-07 18:57): reset its speech
     # detection once, then say it can't hear them and go to the store.
-    gp.DEAF_VOICED_FRAMES, gp.DEAF_SECONDS, gp.CANT_HEAR_GRACE_SECONDS = 20, 0.3, 0.1
+    gp.DEAF_VOICED_FRAMES, gp.DEAF_SECONDS, gp.DEAF_PAUSE_SECONDS, gp.CANT_HEAR_GRACE_SECONDS = 20, 0.3, -1, 0.1
     log = await run([AUDIO, DONE] + ["SLEEP"] * 30, [], reader=VoiceReader())
     deaf = [d for n, d in log["events"] if n == "geminiDeaf"]
     resets = [m for m in log["sent"] if m.get("realtimeInput", {}).get("audioStreamEnd")]
@@ -494,7 +501,11 @@ async def main():
     log2 = await run([AUDIO, DONE] + ["SLEEP"] * 30, [], reader=VoiceReader(b"\x58\x02"))
     check("background noise is not mistaken for a deaf Gemini", not any(n == "geminiDeaf" for n, _ in log2["events"]), [n for n, _ in log2["events"]])
     check("no voice on the line is not mistaken for a deaf Gemini", not any(n == "geminiDeaf" for n, _ in log["events"]), [n for n, _ in log["events"]])
-    gp.DEAF_VOICED_FRAMES, gp.DEAF_SECONDS, gp.CANT_HEAR_GRACE_SECONDS = 75, 4.0, 5
+    # A caller still talking is never "deaf" (a late transcript is not deafness, dev call 2026-11-07 20:15).
+    gp.DEAF_PAUSE_SECONDS = 0.8
+    log = await run([AUDIO, DONE] + ["SLEEP"] * 30, [], reader=VoiceReader())
+    check("a caller still talking is not treated as unheard", not any(n == "geminiDeaf" for n, _ in log["events"]), [n for n, _ in log["events"]])
+    gp.DEAF_VOICED_FRAMES, gp.DEAF_SECONDS, gp.CANT_HEAR_GRACE_SECONDS = 100, 10.0, 5
 
     # Tool results stay in the Live context and are re-billed each turn (2026-10-28): empty fields, default
     # modifier quantities and raw cents go; ids, display totals, tipCents, false/zero and pizza portions stay.

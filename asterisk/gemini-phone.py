@@ -307,6 +307,11 @@ CLAUDE_CHECKER_ENABLED = os.environ.get("AI_PHONE_CLAUDE_CHECKER", "").lower() i
 CHECK_GATED_TOOLS = {"hold", "send", "request_secure_voice_payment"}
 CHECK_GATE_SECONDS = 1.5
 CHECK_MAX_BLOCKS = 2
+# A note used to go in as its own user turn (clientContent, turnComplete) once Gemini and the caller were quiet.
+# Gemini almost never answered it (5-20 s later), and on dev test call 2026-11-07 18:57 it stopped hearing the
+# caller right after one, which it did for none of the 16 notes that rode on a tool result. Notes now ride only on
+# the next tool result and the checkout gate; GEMINI_ORDER_CHECK_NUDGE=true brings the idle nudge back.
+CHECK_IDLE_NUDGE = os.environ.get("GEMINI_ORDER_CHECK_NUDGE", "false").lower() == "true"
 
 
 class OrderChecker:
@@ -558,9 +563,13 @@ CANT_HEAR_GRACE_SECONDS = 5  # time for the line to play before the transfer
 # Gemini stopped hearing a caller whose voice kept arriving (dev test call 2026-11-07 18:57: ~12 s of loud speech,
 # no transcription, only "Take your time."). Voice while the AI is listening, with nothing transcribed for a
 # while, means its speech detection is stuck: reset it once, and if that happens again, go to the store.
-DEAF_VOICED_FRAMES = 75  # 20 ms frames: 1.5 s of voice
+# Gemini's transcript of a long sentence can arrive 4-5 s late (dev call 2026-11-07 20:15 was sent to the store
+# while it heard fine), so "deaf" means no sign of hearing at all (no transcript, AI speech or tool call) for
+# DEAF_SECONDS, with DEAF_VOICED_FRAMES of loud speech and the caller now pausing.
+DEAF_VOICED_FRAMES = 100  # 20 ms frames: 2 s of voice
 DEAF_RMS = 1500  # clearly speech, not a TV or kitchen in the background (that call's speech peaked 5,000-7,800)
-DEAF_SECONDS = 4.0
+DEAF_SECONDS = 10.0
+DEAF_PAUSE_SECONDS = 0.8
 
 
 def stall_nudge_message(caller_turn=True):
@@ -1018,7 +1027,7 @@ async def bridge(reader, writer, call_id):
         else None
     )
     person_handoff = {"reason": None, "task": None, "turn": 0, "line_said": False, "line_blocks": 0}
-    caller_stats = {"frames": 0, "voiced": 0, "peak": 0, "window_frames": 0, "window_peak": 0, "voiced_listening": 0, "heard_mark": 0}
+    caller_stats = {"frames": 0, "voiced": 0, "peak": 0, "window_frames": 0, "window_peak": 0, "voiced_listening": 0, "heard_mark": 0, "last_loud": 0.0}
 
     async def save_transcript(speaker, text, turn_id):
         value = " ".join(str(text or "").split()).strip()
@@ -1121,8 +1130,10 @@ async def bridge(reader, writer, call_id):
                     caller_stats["frames"] += 1
                     caller_stats["window_frames"] += 1
                     caller_stats["voiced"] += level > VOICE_RMS
-                    if level > DEAF_RMS and not playback.assistant_speaking and playback.state == "LISTENING":
-                        caller_stats["voiced_listening"] += 1
+                    if level > DEAF_RMS:
+                        caller_stats["last_loud"] = time.monotonic()
+                        if not playback.assistant_speaking and playback.state == "LISTENING":
+                            caller_stats["voiced_listening"] += 1
                     caller_stats["peak"] = max(caller_stats["peak"], level)
                     caller_stats["window_peak"] = max(caller_stats["window_peak"], level)
                     pcm16, input_state = audioop.ratecv(
@@ -1152,6 +1163,7 @@ async def bridge(reader, writer, call_id):
                 server = message.get("serverContent", {})
                 if conversation_progress(message):
                     last_progress = time.monotonic()
+                    caller_stats["heard_mark"] = caller_stats["voiced_listening"]
                 interrupted = server.get("interrupted") is True
                 if message.get("goAway") is not None:
                     await emit("goAway", {**playback.snapshot(), "timeLeft": message["goAway"].get("timeLeft")})
@@ -1336,6 +1348,8 @@ async def bridge(reader, writer, call_id):
                                             "remedy": "Do not transfer. Say something short like: Take your time, what can I get for you? Then wait.",
                                         }
                                     }
+                                # Let the caller hear the transfer line before the bridge lets go (dev call 2026-11-07 20:16).
+                                await playback.wait_until_complete()
                                 value = await app_action(
                                     call_id,
                                     "handoff",
@@ -1461,6 +1475,7 @@ async def bridge(reader, writer, call_id):
                     and not user_turn_open
                     and now - last_customer_speech > DEAF_SECONDS
                     and now - last_progress > DEAF_SECONDS
+                    and now - caller_stats["last_loud"] > DEAF_PAUSE_SECONDS
                     and playback.state == "LISTENING"
                     and not playback.assistant_speaking
                 ):
@@ -1549,7 +1564,7 @@ async def bridge(reader, writer, call_id):
             asyncio.create_task(playback.run()),
             asyncio.create_task(stall_watchdog()),
         ]
-        if checker:
+        if checker and CHECK_IDLE_NUDGE:
             tasks.append(asyncio.create_task(order_check_watch()))
         tasks.append(asyncio.create_task(caller_audio_watch()))
         done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)

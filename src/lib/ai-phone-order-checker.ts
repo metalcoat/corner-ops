@@ -29,6 +29,8 @@ export type OrderCheckInput = {
   stage: OrderCheckStage;
   /** The store rules block Gemini was given (ai-phone-store-rules.ts), so a store rule isn't flagged as a mistake. */
   storeRules?: string;
+  /** The assistant's recent cart changes that didn't go through: what it understood, even when speech-to-text garbled it. */
+  failedAttempts?: string[];
   transcript: Array<{ speaker: "customer" | "assistant"; text: string }>;
   cart: OrderCheckLine[];
   serviceType: string;
@@ -73,7 +75,7 @@ For each mismatch also choose an action; the ordering system may apply add_item 
 - add_to_line: an existing cart line is missing a topping, sauce, flavor, dip, side or choice the caller clearly stated, or has the wrong pick in a pick-one choice (e.g. Mild instead of Hot). Give that line's lineId and only the modifiers to add.
 - note: everything else, which goes to the ordering assistant as a note: removing anything, a lower quantity, one item split in two, a different size or item, an omission like "no tomato", pickup/delivery, address, payment, and anything you're not fully sure of.
 For a modifier give group only when you know the cart's exact group name, else "". placement is "side" or "topping" only when the caller said on the side or on top, portion only for a half pizza topping, amount only for extra; otherwise "". For note, item is {"name":"","variant":"","quantity":1,"modifiers":[]} and lineId "".
-callerQuote: the caller's own words in the conversation that ask for it, copied exactly. sure: true only when those words plainly ask for exactly this; false for anything garbled, mis-heard or guessed.
+callerQuote: the caller's own words in the conversation that ask for it, copied exactly. sure: true only when those words plainly ask for exactly this; false for anything garbled, mis-heard or guessed. A cart change the assistant tried that didn't go through shows what it heard from the caller's real voice: when it matches the caller's words (e.g. "30 Wayne medium with blue cheese and celery" and a failed add of 30 Wings), the request is clear, so sure can be true. Never add an item that failed as not on the menu.
 
 Menu wording rules the ordering assistant follows:
 ${MENU_SHORTHAND}`;
@@ -160,7 +162,7 @@ export async function checkOrder(input: OrderCheckInput, timeoutMs = 12_000): Pr
         messages: [
           {
             role: "user",
-            content: `${input.storeRules ? `${input.storeRules}\n\n` : ""}Stage: ${input.stage}\nService: ${input.serviceType || "not chosen yet"}\n\nConversation so far:\n${conversation || "(nothing yet)"}\n\nCurrent cart:\n${cart}`,
+            content: `${input.storeRules ? `${input.storeRules}\n\n` : ""}${input.failedAttempts?.length ? `Cart changes the assistant tried that did not go through (oldest first):\n${input.failedAttempts.map((row) => `- ${row}`).join("\n")}\n\n` : ""}Stage: ${input.stage}\nService: ${input.serviceType || "not chosen yet"}\n\nConversation so far:\n${conversation || "(nothing yet)"}\n\nCurrent cart:\n${cart}`,
           },
         ],
       },
@@ -202,12 +204,24 @@ export async function loadOrderCheckInput(callId: string, stage: OrderCheckStage
   const segments = await sql`SELECT speaker,transcript FROM ordering_call_transcript_segments WHERE business='Corner Deli' AND call_id=${callId} ORDER BY completed_at,id`;
   const transcript = segments.map((row: any) => ({ speaker: row.speaker === "customer" ? ("customer" as const) : ("assistant" as const), text: String(row.transcript) }));
   if (pendingCustomerText.trim()) transcript.push({ speaker: "customer", text: pendingCustomerText.trim() });
-  if (!orderId) return { stage, transcript, cart: [], serviceType: "", orderId };
+  const failed = await sql`SELECT input_summary,error_code FROM ordering_ai_tool_events WHERE business='Corner Deli' AND conversation_id=${callId} AND tool_name='price_order' AND outcome<>'success' ORDER BY created_at DESC LIMIT 6`;
+  const failedAttempts = failed
+    .reverse()
+    .map((row: any) => {
+      const summary = typeof row.input_summary === "string" ? JSON.parse(row.input_summary) : row.input_summary || {};
+      const items = (Array.isArray(summary.customerItems) ? summary.customerItems : [])
+        .map((item: any) => `${item.quantity && item.quantity > 1 ? `${item.quantity}x ` : ""}${[item.name, item.variant].filter(Boolean).join(" ")}${Array.isArray(item.modifiers) && item.modifiers.length ? ` [${item.modifiers.map((mod: any) => mod?.name).filter(Boolean).join(", ")}]` : ""}`)
+        .join("; ");
+      return items ? `${summary.operation || "add"} ${items} (${row.error_code || "failed"})` : "";
+    })
+    .filter(Boolean);
+  if (!orderId) return { stage, transcript, cart: [], serviceType: "", orderId, failedAttempts };
   const order = (await sql`SELECT service_type FROM ordering_orders WHERE id=${orderId}`)[0];
   const lines = await sql`SELECT i.cart_line_id,i.item_name_snapshot,i.variant_name_snapshot,i.quantity,i.line_total_cents,COALESCE((SELECT json_agg(json_build_object('name',m.option_name_snapshot,'portion',m.pizza_topping_portion,'toppingAmount',m.pizza_topping_amount,'amount',m.amount,'quantity',m.quantity) ORDER BY m.created_at,m.id) FROM ordering_order_item_modifiers m WHERE m.order_item_id=i.id AND m.selection_state='selected'),'[]') mods FROM ordering_order_items i WHERE i.order_id=${orderId} ORDER BY i.sort_order,i.created_at,i.id`;
   return {
     stage,
     transcript,
+    failedAttempts,
     serviceType: String(order?.service_type || ""),
     orderId,
     cart: lines.map((row: any) => ({
