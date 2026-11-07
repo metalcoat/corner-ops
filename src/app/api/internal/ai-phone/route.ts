@@ -12,7 +12,7 @@ import {
   prepareVoicePayment,
   voicePaymentInternalAuthorized,
 } from "@/lib/ordering-voice-payment";
-import { buildPhoneInstructions } from "@/lib/openai-phone-prompt";
+import { buildPhoneInstructions, ON_DEMAND_RULES } from "@/lib/openai-phone-prompt";
 import { phoneOrderingCustomerContext } from "@/lib/ordering-customers";
 import { callerFromSipHeaders } from "@/lib/openai-phone-ordering";
 import { claimCallerFromAiIngress } from "@/lib/three-cx-live-calls";
@@ -79,7 +79,9 @@ export async function GET(request: Request) {
         business,
         customer,
         storeRules,
+        onDemandRules: true,
       })}\nAfter speaking the exact final closing sentence, call complete_call.`,
+      onDemandRules: ON_DEMAND_RULES,
     });
   }
   const settings = await getAiPhoneSettings();

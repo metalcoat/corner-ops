@@ -560,6 +560,30 @@ def is_closing_line(text):
     ) and ("thanks for calling" in closing or "see you then" in closing)
 
 
+def on_demand_rules(rules, seen, arguments, result):
+    """Rules the app left out of the always-on instructions (ON_DEMAND_RULES in openai-phone-prompt.ts) that this
+    tool call is the first to need: delivery, or an item like a burger or hot meal. Each goes out once per call."""
+    names = [str(item.get("name", "")) for item in (arguments or {}).get("items") or [] if isinstance(item, dict)]
+    service = {str((arguments or {}).get("serviceType") or "")}
+    if isinstance(result, dict):
+        service.add(str(result.get("service_type") or ""))
+        names += [str(line.get("name", "")) for line in result.get("lines") or [] if isinstance(line, dict)]
+        details = result.get("details") or (result.get("error") or {}).get("details") or {}
+        pending = details.get("pendingItem") if isinstance(details, dict) else None
+        if isinstance(pending, dict):
+            names += [str(pending.get("customerRequest") or ""), str(pending.get("category") or "")]
+    texts = []
+    for rule in rules or []:
+        key, pattern = rule.get("key"), rule.get("match") or ""
+        if key in seen or not pattern:
+            continue
+        targets = service if pattern == "^delivery$" else names
+        if any(re.search(pattern, value, re.IGNORECASE) for value in targets if value):
+            seen.add(key)
+            texts.append(rule.get("text", ""))
+    return texts
+
+
 # Dev test call 2026-11-07 17:44: right after the caller's "Yeah" to the readback, Gemini called complete_call with
 # no goodbye and the caller heard the line go dead. A complete_call before the closing line is sent back once.
 def closing_not_said():
@@ -949,6 +973,7 @@ async def bridge(reader, writer, call_id):
     last_assistant_done = 0.0
     closing_tasks = set()
     closing_state = {"said": False, "blocks": 0}
+    rules_sent = set()
     model_turns = 0
     closing_interrupted = False
     cancelled_tool_calls = set()
@@ -1300,6 +1325,10 @@ async def bridge(reader, writer, call_id):
                         tool_gate.record(turn_key, name, arguments, result)
                         if checker and is_mutation and not is_failed_tool_result(result):
                             checker.schedule("cart", customer_transcript)
+                    item_rules = on_demand_rules(session.get("onDemandRules"), rules_sent, arguments, result) if name == "price_order" else []
+                    if item_rules and isinstance(result, dict):
+                        result = {**result, "itemRules": item_rules}
+                        await emit("itemRulesSent", {"count": len(item_rules)})
                     if checker and checker.has_note() and isinstance(result, dict) and not close_requested.is_set():
                         result = {**result, "orderCheck": checker.take_note()}
                         await emit("orderCheckNote", {"via": "toolResult", "tool": name})

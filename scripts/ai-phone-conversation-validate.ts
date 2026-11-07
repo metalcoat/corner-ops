@@ -93,7 +93,7 @@ async function main() {
     "totalDisplay",
     "SHADOW",
     "Maximum",
-    "Would you like mushrooms, onions, or peppers on it?",
+    "Would you like peppers, mushrooms, or onions on that?",
     "hamburgerSteakToppingsDecision",
     "What's the first and last name for the order?",
     "Never ask whether their name is “Customer,”",

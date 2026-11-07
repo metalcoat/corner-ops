@@ -214,6 +214,16 @@ async def main():
     log = await run([closing, {"serverContent": {"generationComplete": True, "turnComplete": True}}, "SLEEP", "SLEEP", "SLEEP"], [])
     check("uninterrupted goodbye completes the call", "complete" in log["app"] and "handoff" not in log["app"], log["app"])
 
+    # Rules left out of the always-on instructions arrive once, with the first tool result that needs them (2026-11-07).
+    RULES = [{"key": "delivery", "match": "^delivery$", "text": "DELIVERY RULES"}, {"key": "burger", "match": "burger", "text": "BURGER RULES"},
+             {"key": "steak_sub", "match": "^(?:steak|chicken fajita|hot sausage)\\b", "text": "STEAK RULES"}]
+    seen = set()
+    check("a burger add brings the burger rules", gp.on_demand_rules(RULES, seen, {"items": [{"name": "Cheeseburger"}]}, {"lines": []}) == ["BURGER RULES"], seen)
+    check("each rule set is sent once per call", gp.on_demand_rules(RULES, seen, {"items": [{"name": "Bacon Burger"}]}, {}) == [], seen)
+    check("delivery rules come with a delivery cart or address error", gp.on_demand_rules(RULES, set(), {"serviceType": "delivery", "items": []}, {"error": {"code": "INVALID_INPUT"}}) == ["DELIVERY RULES"], {})
+    check("a pickup pizza brings no extra rules", gp.on_demand_rules(RULES, set(), {"serviceType": "pickup", "items": [{"name": "Pizza"}]}, {"service_type": "pickup", "lines": [{"name": "Pizza"}]}) == [], {})
+    check("a pending steak sub question brings the steak-sub rules", gp.on_demand_rules(RULES, set(), {"items": [{"name": "steak sub"}]}, {"pending": True, "details": {"pendingItem": {"customerRequest": "Steak"}}}) == ["STEAK RULES"], {})
+    check("no rules from the app: nothing attached", gp.on_demand_rules(None, set(), {"items": [{"name": "Burger"}]}, {}) == [], {})
     check("pickup goodbye counts as the closing line", gp.is_closing_line("Give us 30 minutes, and it\u2019ll be ready. Thanks for calling\u2014see you then!"), {})
     log = await run([transcript("yeah"), tool_call("c1", {}, "complete_call"), "WAIT_TOOL_RESPONSE", tool_call("c2", {}, "complete_call"), "WAIT_TOOL_RESPONSE"], [])
     check("complete_call before any goodbye is sent back once", first_result(log, 0).get("error", {}).get("code") == "CLOSING_NOT_SAID" and log["app"].count("complete") == 1, {"app": log["app"], "results": log["toolResponses"]})
