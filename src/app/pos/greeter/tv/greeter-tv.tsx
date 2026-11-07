@@ -126,8 +126,8 @@ export default function GreeterTv({ qrSvg, orderUrl, season, followSeason, ribbo
     return () => { stopped = true; window.clearInterval(timer); };
   }, [nflDate]);
 
-  // Background music from the season's YouTube playlist (shuffled, looping). YouTube requires
-  // its player to stay visible, so it sits in the "Now playing" card.
+  // Background music from the season's YouTube playlist (shuffled, looping). The player is on the page but
+  // invisible (greeter-tv.css), so only the sound comes through.
   useEffect(() => {
     const app = tvBridge();
     if (playlist && app) {

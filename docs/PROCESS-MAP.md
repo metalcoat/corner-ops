@@ -434,8 +434,8 @@ flowchart LR
 - Greeter on the Fire TV (192.168.6.83, Corner Deli display app): `http://192-168-1-237.nip.io:3000/pos/greeter/tv`
   (a name, not the bare IP, because YouTube won't play embeds on IP-address pages) is the web greeter with the same slides as
   the Pi (logo + QR, weather, fun fact, hours, 15 s each), the walk-in welcome and sound, and the menu board's
-  seasons. Background music: a YouTube playlist per season from `src/lib/greeter-playlists.ts` (shown in a small "Now
-  playing" card, since YouTube's player must stay visible); without playlists, audio files in the uploads volume under `greeter-music/<season>/` (halloween,
+  seasons. Background music: a YouTube playlist per season from `src/lib/greeter-playlists.ts` (in the Corner Deli display
+  app the app plays it; in a browser the page's YouTube player is invisible, full size behind the slides, so only the sound comes through — 2026-11-07); without playlists, audio files in the uploads volume under `greeter-music/<season>/` (halloween,
   thanksgiving, christmas) or `greeter-music/everyday/` (`GET /api/pos/greeter/music?season=`); it pauses for each
   welcome. Music and welcome volumes (0–100, table `greeter_tv_settings`) are set in POS Settings › Operations and
   reach the TV with each walk-in poll (`GET /api/pos/greeter` returns `volumes`). On NFL game days an "NFL today" screen (kickoffs, live scores, finals; Bills picked out) comes round
