@@ -415,14 +415,20 @@ async def main():
         ("representative", gp.PERSON_REASON), ("operator please", gp.PERSON_REASON), ("let me talk to the store", gp.PERSON_REASON),
         ("this isn't working", gp.FRUSTRATED_REASON), ("no, no, no", gp.FRUSTRATED_REASON), ("oh forget it", gp.FRUSTRATED_REASON),
         ("a turkey big boss and two pizzas", None), ("no tomato on that", None), ("pizza for four people", None), ("no", None),
+        ("I'll be cheese and sorry. Fuck.", None), ("damn, I meant ranch", None),
     ]:
         check(f"person handoff wording: {text!r}", gp.person_handoff_reason(text) == want, gp.person_handoff_reason(text))
-    gp.PERSON_HANDOFF_GRACE_SECONDS = 0.2
+    gp.PERSON_HANDOFF_GRACE_SECONDS, gp.HANDOFF_LINE_WAIT_SECONDS = 0.2, 0.2
     log = await run([transcript("can I just talk to a real person"), "SLEEP", "SLEEP", "SLEEP", "SLEEP", "SLEEP"], [])
     told = [m for m in log["sent"] if "clientContent" in m and "let me get you to someone at the store" in json.dumps(m)]
-    check("Gemini is told the exact line to say", len(told) == 1, len(told))
+    check("Gemini is told the exact line to say, and again before a forced transfer", len(told) == 2, len(told))
     check("a person request tells Gemini the line and transfers when Gemini doesn't", "handoff" in log["app"] and any(n == "personHandoffRequested" and d.get("reason") == gp.PERSON_REASON for n, d in log["events"]) and any(n == "personHandoffForced" for n, _ in log["events"]), {"app": log["app"], "events": [n for n, _ in log["events"]]})
     check("the person handoff happens only once", log["app"].count("handoff") == 1, log["app"])
+    # Dev test call 2026-11-07 18:35: a caller who keeps ordering after a transfer started stays with the AI.
+    log = await run([transcript("this isn't working"), AUDIO, DONE, transcript("can I also get 10 wings"), "SLEEP", "SLEEP", "SLEEP", "SLEEP", "SLEEP"], [])
+    check("a caller who keeps ordering is not transferred", not any(n == "personHandoffForced" for n, _ in log["events"]) and any(n == "personHandoffCancelled" for n, _ in log["events"]), {"app": log["app"], "events": [n for n, _ in log["events"]]})
+    log = await run([transcript("yeah"), tool_call("h1", {"reason": "Caller asked for a person"}, "request_human_handoff"), "WAIT_TOOL_RESPONSE", tool_call("h2", {"reason": "Caller asked for a person"}, "request_human_handoff"), "WAIT_TOOL_RESPONSE"], [])
+    check("a transfer before the caller heard the line is sent back once", first_result(log, 0).get("error", {}).get("code") == "SAY_HANDOFF_LINE" and "error" not in first_result(log, 1) and "handoff" in log["app"], {"app": log["app"], "results": log["toolResponses"]})
 
     # A caller turn Gemini never closes (noise kept it "speaking"; dev test call 2026-11-06 went silent for 20 s)
     # gets the audio stream ended before the nudge, so Gemini answers.

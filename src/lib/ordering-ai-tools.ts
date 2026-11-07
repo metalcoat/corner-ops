@@ -1000,10 +1000,14 @@ function strictMatch<T>(
         ? terms(ranked[0].row)[0]
         : undefined;
   if (automatic) return ranked[0].row;
+  // A close match is offered, never added on its own (dev call 2026-11-07 18:34: "cheesy bread" found Cheesy
+  // Breadsticks, but the caller only heard "we don't have that").
   throw new AiToolError(
     code,
     code === "ITEM_NOT_ON_MENU"
-      ? "Sorry, we don't have that on the menu."
+      ? suggestion
+        ? `We have ${suggestion}, would you like ${/s$/i.test(suggestion.trim()) ? "those" : "that"}?`
+        : "Sorry, we don't have that on the menu."
       : code === "INVALID_MODIFIER"
         ? `Sorry, ${query} isn't an option on that.`
         : `Sorry, ${query} isn't an available size or option.`,
@@ -2346,7 +2350,7 @@ export async function priceSpokenOrder(input: {
       if (
         /^hamburger steak/i.test(item.name) &&
         !input.resolvedPendingQuestions?.includes("hamburger_steak_toppings") &&
-        !spokenModifiers.some((modifier) => /^(?:extra\s+)?(?:mushrooms?|onions?|peppers?)$/i.test(String(modifier.name).trim()))
+        !item.modifiers.some((group) => /^hamburger steak options$/i.test(group.name) && (modifierSelections[group.id]?.length || 0) > 0)
       )
         throw new AiToolError("FOLLOW_UP_REQUIRED", "Would you like peppers, mushrooms, or onions on that?", "Ask exactly: Would you like peppers, mushrooms, or onions on that?", 409, { pendingItem: { category: spokenKey(item.name), customerRequest: requested.name, actualMenuItemId: item.id, actualVariantId: variant?.id || null, pendingQuestion: "hamburger_steak_toppings", missingRequiredFields: ["hamburger steak toppings"] } });
       if (

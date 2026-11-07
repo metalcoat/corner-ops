@@ -403,14 +403,37 @@ PERSON_REQUEST = re.compile(
     r"|\b(?:an?\s+)?agent\b|\blet me talk to\b|\btransfer me\b|\bget me (?:a|someone|somebody)\b",
     re.IGNORECASE,
 )
+# A swear word on its own is not frustration: dev test call 2026-11-07 18:35 ("...cheese and sorry. F***.") was a
+# caller correcting themselves mid-order and got transferred.
 FRUSTRATION = re.compile(
-    r"\bthis (?:isn'?t|is not|ain'?t) working\b|\bforget it\b|\bf+u+c+k\w*|\bshit\b|\bdamn\b|\bstupid\b|\bridiculous\b"
+    r"\bthis (?:isn'?t|is not|ain'?t) working\b|\bforget it\b|\bstupid\b|\bridiculous\b"
     r"|\buseless\b|\bwhat the hell\b|\bno,?\s+no,?\s+no\b|\bnot what i (?:said|asked|want)",
     re.IGNORECASE,
 )
 PERSON_REASON = "Caller asked for a person"
 FRUSTRATED_REASON = "Caller sounded frustrated"
 PERSON_HANDOFF_GRACE_SECONDS = 6
+# The caller must hear the transfer line before the line goes quiet (same call: "No problem, let me" was cut off).
+HANDOFF_LINE = re.compile(r"someone at the store", re.IGNORECASE)
+HANDOFF_LINE_WAIT_SECONDS = 6
+
+
+def say_handoff_line():
+    return {
+        "clientContent": {
+            "turns": [{"role": "user", "parts": [{"text": "(Say exactly: \u201cNo problem, let me get you to someone at the store.\u201d Nothing else.)"}]}],
+            "turnComplete": True,
+        }
+    }
+
+
+def handoff_cancelled_message():
+    return {
+        "clientContent": {
+            "turns": [{"role": "user", "parts": [{"text": "(The caller kept ordering, so don't transfer them. Carry on with what they just said.)"}]}],
+            "turnComplete": True,
+        }
+    }
 
 
 def person_handoff_reason(text):
@@ -988,7 +1011,7 @@ async def bridge(reader, writer, call_id):
         if CLAUDE_CHECKER_ENABLED
         else None
     )
-    person_handoff = {"reason": None, "task": None}
+    person_handoff = {"reason": None, "task": None, "turn": 0, "line_said": False, "line_blocks": 0}
     caller_stats = {"frames": 0, "voiced": 0, "peak": 0, "window_frames": 0, "window_peak": 0}
 
     async def save_transcript(speaker, text, turn_id):
@@ -1149,15 +1172,31 @@ async def bridge(reader, writer, call_id):
                     reason = person_handoff_reason(customer_transcript)
                     if reason and not person_handoff["reason"] and not close_requested.is_set():
                         person_handoff["reason"] = reason
+                        person_handoff["turn"] = customer_turn_id
                         await emit("personHandoffRequested", {"reason": reason})
                         await gemini.send(json.dumps(person_handoff_message(reason)))
 
                         async def ensure_person_handoff(reason=reason):
-                            # Gemini normally says the line and calls request_human_handoff; if not, transfer anyway.
+                            # Gemini normally says the line and calls request_human_handoff; if not, transfer anyway,
+                            # but never silently, and not when the caller just kept ordering.
                             await asyncio.sleep(PERSON_HANDOFF_GRACE_SECONDS)
                             if close_requested.is_set():
                                 return
-                            await emit("personHandoffForced", {"reason": reason})
+                            if customer_turn_id > person_handoff["turn"] and not person_handoff_reason(customer_transcript):
+                                await emit("personHandoffCancelled", {"reason": reason})
+                                person_handoff.update({"reason": None, "task": None, "line_said": False})
+                                await gemini.send(json.dumps(handoff_cancelled_message()))
+                                return
+                            if not person_handoff["line_said"]:
+                                await gemini.send(json.dumps(say_handoff_line()))
+                                waited = 0.0
+                                while not person_handoff["line_said"] and waited < HANDOFF_LINE_WAIT_SECONDS:
+                                    await asyncio.sleep(0.25)
+                                    waited += 0.25
+                            await playback.wait_until_complete()
+                            if close_requested.is_set():
+                                return
+                            await emit("personHandoffForced", {"reason": reason, "lineSaid": person_handoff["line_said"]})
                             value = await app_action(call_id, "handoff", reason=reason)
                             if value.get("closeBridge", True):
                                 close_requested.set()
@@ -1168,6 +1207,8 @@ async def bridge(reader, writer, call_id):
                 output_transcription = server.get("outputTranscription", {})
                 if output_transcription.get("text"):
                     assistant_transcript = join_transcript(assistant_transcript, output_transcription["text"])
+                    if HANDOFF_LINE.search(assistant_transcript):
+                        person_handoff["line_said"] = True
                 for part in (
                     []
                     if interrupted
@@ -1267,6 +1308,16 @@ async def bridge(reader, writer, call_id):
                                 if note:
                                     return order_check_blocked(note)
                             if name == "request_human_handoff":
+                                silence = silence_handoff_blocked(arguments.get("reason", ""), time.monotonic() - last_customer_speech)
+                                if not silence and not person_handoff["line_said"] and not HANDOFF_LINE.search(assistant_transcript) and person_handoff["line_blocks"] < 1:
+                                    person_handoff["line_blocks"] += 1
+                                    return {
+                                        "error": {
+                                            "code": "SAY_HANDOFF_LINE",
+                                            "message": "The caller hasn't been told about the transfer.",
+                                            "remedy": "Say exactly: No problem, let me get you to someone at the store. Then call request_human_handoff again.",
+                                        }
+                                    }
                                 if silence_handoff_blocked(arguments.get("reason", ""), time.monotonic() - last_customer_speech):
                                     # "Um" is not silence (dev test call 2026-10-25 was transferred 2 s after "Um").
                                     return {

@@ -13,6 +13,8 @@ import {
   callerCustomerLookup,
   priceSpokenOrder,
   serviceType,
+  menuCatalog,
+  spokenKey,
 } from "@/lib/ordering-ai-tools";
 import {
   bindPhoneOrderId,
@@ -832,6 +834,26 @@ async function callTool(rpc: Rpc) {
         }),
       );
       if (compact.wingReadback) (result as Record<string, any>).wingReadback = compact.wingReadback;
+    }
+    // A pizza added with nothing on it is asked about (dev call 2026-11-07 18:34: "two jumbo pizzas" went in plain and
+    // nobody asked), unless the caller said cheese or plain, or named a topping (the order checker handles a missed one).
+    if (requestedName === "price_order" && String(args.operation || "") === "add" && result && typeof result === "object" && !(result as Record<string, any>).required_follow_up) {
+      const bare = (Array.isArray(args.items) ? (args.items as Array<Record<string, any>>) : []).filter(
+        (item) => /^(?:sheet\s+)?pizza$/i.test(String(item?.name || "").trim()) && !(Array.isArray(item.modifiers) && item.modifiers.length),
+      );
+      const said = ` ${spokenKey(String(args.customerText || ""))} `;
+      if (bare.length && !/ (?:cheese|plain|nothing|just sauce) /.test(said)) {
+        const pizza = (await menuCatalog("Corner Deli", new Date(), "Pizza")).flatMap((category) => category.items || []).find((item: any) => /^pizza$/i.test(item.name));
+        const toppings = (pizza?.modifiers || []).find((group: any) => group.name === "Pizza Toppings")?.options || [];
+        const namedTopping = toppings.some((option: any) => {
+          const key = spokenKey(String(option.name));
+          return key.length > 2 && said.includes(` ${key} `);
+        });
+        if (!namedTopping)
+          (result as Record<string, any>).required_follow_up = bare.some((item) => Number(item.quantity || 1) > 1)
+            ? "What would you like on them? If they're different, tell me each one."
+            : "What would you like on it, or just cheese?";
+      }
     }
     // The delivery address rides on every cart result, so Gemini can drop old call audio (a shorter context
     // window, 2026-11-07) without asking for the address again.

@@ -461,6 +461,8 @@ async function main() {
       actor,
       service: "pickup",
       customerText: "hamburger steak with small mashed potatoes",
+      // The toppings question (asked first since 2026-11-07) was answered no.
+      resolvedPendingQuestions: ["hamburger_steak_toppings"],
       items: [
         {
           name: "Hamburger Steak",
