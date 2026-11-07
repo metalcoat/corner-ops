@@ -447,7 +447,7 @@ flowchart LR
 - Lobby trivia (dev, 2026-11-07): the greeter TV's bottom-right corner (`src/app/pos/greeter/tv/trivia-corner.tsx`,
   polling `GET /api/pos/greeter/trivia` every 4 s) shows a QR that changes every minute (HMAC of the minute,
   `src/lib/trivia-rules.ts`; good for 2–3 minutes), the top 5 Today → This month → This year, the question someone is
-  on, and "<name> got it!". It grows for each walk-in's welcome and 15 s after. The QR opens `/trivia` on the public
+  on, and "<name> got it!". It grows to the bottom centre during each walk-in's welcome. The QR opens `/trivia` on the public
   site (`TRIVIA_BASE_URL`, else dev.ordercornerdeli.com / ordercornerdeli.com in production); a scan lets that phone
   play 30 minutes. Nickname, then up to 15 random questions a store day (4 AM day, no repeats), checked on the server
   (`POST /api/customer/trivia`, `src/lib/lobby-trivia.ts`; tables `trivia_*`, migration 0047; questions in

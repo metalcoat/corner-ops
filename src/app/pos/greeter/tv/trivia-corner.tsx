@@ -5,8 +5,6 @@ import { useEffect, useRef, useState } from "react";
 const POLL_MS = 4_000;
 const PANEL_MS = 8_000;
 const CHEER_MS = 5_000;
-/** After a walk-in's welcome the QR stays big this long, then shrinks back into the corner. */
-const BIG_AFTER_WELCOME_MS = 15_000;
 const BOARD_NAMES = { today: "Today", month: "This month", year: "This year" } as const;
 type Period = keyof typeof BOARD_NAMES;
 type Trivia = {
@@ -21,10 +19,11 @@ type Panel = Period | "question";
  * is on, and "<name> got it!" when someone answers right. Gone when trivia is switched off in POS Settings.
  */
 export default function TriviaCorner({ welcome }: { welcome: boolean }) {
+  // A walk-in: big "Play trivia while you wait" QR under the welcome, back to the corner after.
+  const big = welcome;
   const [trivia, setTrivia] = useState<Trivia | null>(null);
   const [panel, setPanel] = useState(0);
   const [cheer, setCheer] = useState<string | null>(null);
-  const [big, setBig] = useState(false);
   const cheered = useRef<Set<number> | null>(null);
   const queue = useRef<string[]>([]);
 
@@ -61,12 +60,6 @@ export default function TriviaCorner({ welcome }: { welcome: boolean }) {
     return () => window.clearInterval(timer);
   }, []);
 
-  // A walk-in: big "Play trivia while you wait" QR through the welcome and a little after.
-  useEffect(() => {
-    if (welcome) { setBig(true); return; }
-    const timer = window.setTimeout(() => setBig(false), BIG_AFTER_WELCOME_MS);
-    return () => window.clearTimeout(timer);
-  }, [welcome]);
 
   if (!trivia?.enabled || !trivia.qrSvg || !trivia.boards) return null;
   const panels: Panel[] = ["today", "month", "year", ...(trivia.question ? ["question" as const] : [])];
