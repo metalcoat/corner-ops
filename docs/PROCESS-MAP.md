@@ -179,6 +179,9 @@ flowchart LR
   - It runs daily at 04:40 from chris's crontab (added by Chris 2026-11-06), using the runtime copy.
   - Under 8 GB free it emails the owner at most once a day (`ALERT_TO_EMAIL`, else `APP_EMAIL`), using the app's SMTP settings (`deploy/send-alert-email.py`). The email includes a plain-English list of what's using space, largest first, each marked safe to clean or keep (`deploy/disk-usage-summary.py`).
   - `--test-alert` sends that email once without cleaning anything.
+  - Since 2026-11-07 it also removes stopped one-off containers (no restart policy, never prod/prodref) older than 7 days, npm/npx/pip cache files untouched for 7 days, and deploy logs older than 30 days. Helper logs in `~/.local/state` over 20 MB are cut to their last 5000 lines.
+  - Each run logs the space freed, and the low-disk email includes the last runs.
+  - The system journal (about 730 MB) can only be capped with admin rights: `sudo journalctl --vacuum-size=500M`.
   - Phone cart results carry `wingReadback` ("10 wings mild, 10 wings garlic parm, and blue cheese and celery with those") and the prompt reads wings that way.
   - The secure card line hands the caller to staff on the second failed answer of any kind with "Sorry, we must be having an issue. I'm transferring you to someone who will take your card number." (`transfer-card-help`). Before, it allowed up to about 15 retries.
   - A failed card payment leaves the call `handoff_pending` with a readable reason (`src/lib/ai-handoff-reason.ts`), so the POS "AI PHONE ORDER · NEEDS STAFF" popup shows why, plus the order and total. Before, the call was marked ended and the popup never appeared.
