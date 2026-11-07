@@ -214,6 +214,9 @@ async def main():
     log = await run([closing, {"serverContent": {"generationComplete": True, "turnComplete": True}}, "SLEEP", "SLEEP", "SLEEP"], [])
     check("uninterrupted goodbye completes the call", "complete" in log["app"] and "handoff" not in log["app"], log["app"])
 
+    check("pickup goodbye counts as the closing line", gp.is_closing_line("Give us 30 minutes, and it\u2019ll be ready. Thanks for calling\u2014see you then!"), {})
+    log = await run([transcript("yeah"), tool_call("c1", {}, "complete_call"), "WAIT_TOOL_RESPONSE", tool_call("c2", {}, "complete_call"), "WAIT_TOOL_RESPONSE"], [])
+    check("complete_call before any goodbye is sent back once", first_result(log, 0).get("error", {}).get("code") == "CLOSING_NOT_SAID" and log["app"].count("complete") == 1, {"app": log["app"], "results": log["toolResponses"]})
     check("delivery goodbye counts as the closing line", gp.is_closing_line("Your order is in! Give us about 40 to 55 minutes, and we'll get it to you as soon as we can. Thanks for calling!"), {})
 
     usage = gp.new_usage()

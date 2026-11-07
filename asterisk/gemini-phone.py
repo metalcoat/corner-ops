@@ -552,10 +552,24 @@ def join_transcript(current, chunk):
 
 
 def is_closing_line(text):
-    closing = text.lower()
-    return ("pickup should be ready" in closing or "40 to 55 minutes" in closing or "forty to fifty-five minutes" in closing) and (
-        "thanks for calling" in closing or "see you then" in closing
-    )
+    closing = text.lower().replace("\u2019", "'")
+    # Pickup: "Give us 30 minutes, and it'll be ready. Thanks for calling—see you then!" (pickupClosing in the app).
+    return (
+        "pickup should be ready" in closing or "it'll be ready" in closing or "have it ready" in closing
+        or "40 to 55 minutes" in closing or "forty to fifty-five minutes" in closing
+    ) and ("thanks for calling" in closing or "see you then" in closing)
+
+
+# Dev test call 2026-11-07 17:44: right after the caller's "Yeah" to the readback, Gemini called complete_call with
+# no goodbye and the caller heard the line go dead. A complete_call before the closing line is sent back once.
+def closing_not_said():
+    return {
+        "error": {
+            "code": "CLOSING_NOT_SAID",
+            "message": "The caller hasn't heard the goodbye yet.",
+            "remedy": "Say the exact closing line from your instructions for this order (pickup or delivery), then call complete_call.",
+        }
+    }
 
 
 async def read_packet(reader):
@@ -934,6 +948,7 @@ async def bridge(reader, writer, call_id):
     last_progress = time.monotonic()
     last_assistant_done = 0.0
     closing_tasks = set()
+    closing_state = {"said": False, "blocks": 0}
     model_turns = 0
     closing_interrupted = False
     cancelled_tool_calls = set()
@@ -1155,6 +1170,7 @@ async def bridge(reader, writer, call_id):
                     model_turns += 1
                     await flush_assistant_transcript()
                     if is_closing_line(closing) and not was_interrupted:
+                        closing_state["said"] = True
                         closing_turn = customer_turn_id
 
                         async def finish_call():
@@ -1259,6 +1275,11 @@ async def bridge(reader, writer, call_id):
                                 close_requested.set()
                                 return value
                             if name == "complete_call":
+                                said_bye = re.search(r"\b(?:good)?bye\b", assistant_transcript, re.IGNORECASE)
+                                if not closing_state["said"] and not is_closing_line(assistant_transcript) and not said_bye and closing_state["blocks"] < 1:
+                                    closing_state["blocks"] += 1
+                                    await emit("closingNotSaid", playback.snapshot())
+                                    return closing_not_said()
                                 await playback.wait_until_complete()
                                 value = await app_action(call_id, "complete")
                                 if value.get("closeBridge"):
