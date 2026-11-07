@@ -2898,3 +2898,5 @@
 .posHouseAccountButtons{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}
 .posHouseAccountButtons button{min-height:58px;font-weight:950}
 .posHouseAccountButtons .posHouseAccountCharge{background:#6d28d9;border-color:#c4b5fd;color:#fff}
+.posEmployeeDrinkButton{background:#0e7490!important;border-color:#67e8f9!important}.posEmployeeDrinkDialog{grid-template-rows:auto auto minmax(0,1fr) auto auto}.posEmployeeDrinkSizes{display:grid;gap:12px;overflow-y:auto;min-height:0}.posEmployeeDrinkSizes h3{margin:0 0 6px}.posEmployeeDrinkDialog .posEmployeeMealItems button.active{background:#0e7490;border-color:#67e8f9}.posEmployeeDrinkDialog>footer{gap:10px}
+.posEmployeeDrinkChosen{display:flex;flex-wrap:wrap;gap:8px}.posEmployeeDrinkChosen span{display:inline-flex;align-items:center;gap:6px;padding:4px 4px 4px 10px;border:1px solid #67e8f9;border-radius:999px}.posEmployeeDrinkChosen button{min-height:34px;min-width:34px;padding:0}

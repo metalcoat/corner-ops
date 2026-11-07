@@ -3,11 +3,12 @@
 import { responseMessage } from "@/app/client-http";
 import { CSSProperties, FormEvent, useEffect, useState } from "react";
 import { CORNER_DELI_POSITIONS } from "@/lib/business-positions";
-import { employeePinLabel, employeePinLength, employeePinPattern } from "@/lib/employee-pin";
+import { employeePinLength } from "@/lib/employee-pin";
 import { maskedPhone } from "@/lib/phone";
 import type { Business, SessionView } from "@/lib/types";
-import "../workforce/workforce.css";
+import "../../workforce/workforce.css";
 import "./employees.css";
+import OnboardingChecklist, { type OnboardingStatus } from "../onboarding-checklist";
 
 type Employee = {
   id: string;
@@ -27,16 +28,6 @@ type Employee = {
 };
 type DirectoryData = { employees: Employee[] };
 type BulkPinResult = { updated: string[]; missing: string[]; requested: number; pinLength: number };
-type OnboardingSmsResult = {
-  configured: boolean;
-  sent: number;
-  failed: number;
-  missingPhone: number;
-  notOptedIn: number;
-  skipped: number;
-  failures: Array<{ message: string }>;
-};
-type CreateEmployeeResult = Employee & { onboardingSms?: OnboardingSmsResult | null };
 
 function initials(value: string): string {
   return value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "?";
@@ -53,8 +44,8 @@ export default function EmployeesPage() {
   const [showInactive, setShowInactive] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [inProgress, setInProgress] = useState<OnboardingStatus[]>([]);
   const pinLength = employeePinLength(business);
-  const pinLabel = employeePinLabel(business);
   const inactiveCount = employees.filter((employee) => !employee.active).length;
   const visibleEmployees = showInactive ? employees : employees.filter((employee) => employee.active);
 
@@ -72,9 +63,16 @@ export default function EmployeesPage() {
     setEmployees(payload.employees);
   }
 
+  async function loadOnboarding(activeBusiness = business) {
+    const response = await fetch(`/api/employee-directory/onboarding?business=${encodeURIComponent(activeBusiness)}`, { cache: "no-store" });
+    if (response.ok) setInProgress(((await response.json()) as { inProgress: OnboardingStatus[] }).inProgress || []);
+  }
+
   useEffect(() => {
     if (!session?.authenticated) return;
     setNotice("");
+    setInProgress([]);
+    void loadOnboarding(business).catch(() => undefined);
     void load(business).catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.authenticated, business]);
@@ -93,55 +91,6 @@ export default function EmployeesPage() {
       setNotice(success);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Employee update failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function createEmployee(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const formElement = event.currentTarget;
-    const form = new FormData(formElement);
-    const position = String(form.get("position") || "");
-    setBusy(true);
-    setNotice("");
-    try {
-      const response = await fetch("/api/employee-directory", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          business,
-          action: "create",
-          email: form.get("email"),
-          phone: form.get("phone"),
-          smsOptIn: form.get("smsOptIn") === "on",
-          sendOnboardingSms: true,
-          name: form.get("name"),
-          pin: form.get("pin"),
-          position,
-          roleGroup: business === "Corner Deli" ? (position === "Delivery" ? "Driver" : "In-House") : form.get("roleGroup"),
-          countsForTips: form.get("countsForTips") === "on",
-          hourlyRate: Number(form.get("hourlyRate") || 0),
-          tippedRate: Number(form.get("tippedRate") || 0),
-        }),
-      });
-      if (!response.ok) throw new Error(await responseMessage(response));
-      const result = await response.json() as CreateEmployeeResult;
-      await load();
-      formElement.reset();
-
-      const sms = result.onboardingSms;
-      if (sms?.sent) {
-        setNotice(`Employee created. Onboarding text sent to ${maskedPhone(result.phone)}.`);
-      } else if (!sms) {
-        setNotice("Employee created. Onboarding text was not requested.");
-      } else if (sms.notOptedIn) {
-        setNotice("Employee created, but the onboarding text was not sent because SMS consent is not enabled.");
-      } else {
-        setNotice(`Employee created, but the onboarding text was not sent: ${sms.failures[0]?.message || "SMS delivery was unavailable."}`);
-      }
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Employee could not be created.");
     } finally {
       setBusy(false);
     }
@@ -211,27 +160,16 @@ export default function EmployeesPage() {
 
   return <main className="workforceShell">
     <header className="workforceHero">
-      <div><p className="wfEyebrow">Staff access, identity, and notifications</p><h1>Employees</h1><p>Employee colors and photos appear on schedules. New employees receive their Employee Hub access and paperwork links by SMS after you record their consent.</p></div>
+      <div><p className="wfEyebrow">People · Team</p><h1>Team</h1><p>Everyone on staff. Open a person for their profile, PIN, paperwork, pay and onboarding checklist; click a card to edit quickly. Colors and photos appear on schedules.</p></div>
       <div className="wfBusinessSwitch">{(["Corner Deli", "Tiki"] as Business[]).map((name) => <button key={name} className={business === name ? "selected" : ""} onClick={() => { setBusiness(name); setShowInactive(false); }}>{name}</button>)}</div>
     </header>
     {notice && <div className="wfNotice">{notice}</div>}
     <section className="wfTwoColumn">
       <article className="workforcePanel">
-        <div className="wfPanelHeader"><div><p className="wfEyebrow">Add staff</p><h2>New {business} employee</h2></div></div>
-        <form className="wfForm" onSubmit={createEmployee}>
-          <label>Name<input name="name" required /></label>
-          <label>Email<input name="email" type="email" /></label>
-          <label>Mobile phone<input name="phone" type="tel" placeholder="315-555-0123" required /></label>
-          <label>{pinLabel}<input name="pin" inputMode="numeric" pattern={employeePinPattern(business)} minLength={pinLength} maxLength={pinLength} required /></label>
-          <label>Position{business === "Corner Deli" ? <select name="position" defaultValue="Pizza" required>{CORNER_DELI_POSITIONS.map((position) => <option key={position}>{position}</option>)}</select> : <input name="position" defaultValue="Bartender" required />}</label>
-          {business !== "Corner Deli" && <label>Role group<select name="roleGroup" defaultValue="In-House"><option>In-House</option><option>Driver</option><option>Ignore</option></select></label>}
-          <label>Hourly rate<input name="hourlyRate" type="number" min="0" step="0.01" defaultValue="0" /></label>
-          <label>Tipped rate<input name="tippedRate" type="number" min="0" step="0.01" defaultValue="0" /></label>
-          <label className="wfWide"><input name="countsForTips" type="checkbox" defaultChecked /> Include in eligible tip pools</label>
-          <label className="wfWide"><input name="smsOptIn" type="checkbox" required /> Employee consented to receive onboarding and schedule SMS notifications</label>
-          <p className="wfEmpty wfWide">Creating the employee sends their Employee Hub link, PIN, and new-hire paperwork link, and directs questions to team messages.</p>
-          <button className="wfPrimary" disabled={busy}>{busy ? "Creating…" : "Create employee & send onboarding text"}</button>
-        </form>
+        <div className="wfPanelHeader"><div><p className="wfEyebrow">Add staff</p><h2>New hires</h2></div><a className="wfPrimary" href="/ops/people/add">Add employee</a></div>
+        <p className="wfEmpty">Name and mobile number are all it takes: they get one text to choose their PIN and finish their forms{business === "Corner Deli" ? ", handbook" : ""}, direct deposit and schedule app.</p>
+        {inProgress.length > 0 && <div className="onboardingGrid">{inProgress.map((status) => <OnboardingChecklist key={status.employeeId} business={business} status={status} onChanged={() => void loadOnboarding()} />)}</div>}
+        {inProgress.length === 0 && <p className="wfEmpty">No one is mid-setup right now.</p>}
       </article>
 
       <article className="workforcePanel">
@@ -252,7 +190,7 @@ export default function EmployeesPage() {
           {visibleEmployees.map((employee) => <article className="employeeIdentityCard" key={employee.id} style={{ "--employee-color": employee.scheduleColor } as CSSProperties}>
             <header>
               <span className="employeeIdentityAvatar">{employee.avatarSet ? <img src={avatarUrl(business, employee.id)} alt={`${employee.name} profile`} loading="lazy" /> : initials(employee.name)}</span>
-              <div><strong>{employee.name}</strong><span>{employee.position} · {employee.roleGroup}</span><small>{employee.email || "Email not set"}</small><small>{employee.phone ? maskedPhone(employee.phone) : "Mobile not set"}</small></div>
+              <div><strong><a className="employeeOpenLink" href={`/ops/people/team/${employee.id}?business=${encodeURIComponent(business)}`}>{employee.name}</a></strong><span>{employee.position} · {employee.roleGroup}</span><small>{employee.email || "Email not set"}</small><small>{employee.phone ? maskedPhone(employee.phone) : "Mobile not set"}</small></div>
             </header>
             <div className="employeeIdentityControls">
               <label>Schedule color<input type="color" value={employee.scheduleColor} disabled={busy} onChange={(event) => void action({ action: "update-profile", id: employee.id, scheduleColor: event.target.value }, `${employee.name}'s schedule color was updated.`)} /></label>
@@ -260,8 +198,9 @@ export default function EmployeesPage() {
               <form className="employeePhotoForm" onSubmit={(event) => void uploadPhoto(event, employee)}><label>Icon photo<input name="photo" type="file" accept="image/*" required /></label><button disabled={busy}>Upload photo</button></form>
             </div>
             <footer>
+              <a className="wfTextLink" href={`/ops/people/team/${employee.id}?business=${encodeURIComponent(business)}`}>Open</a>
               <span className={`wfBadge ${employee.active ? "approved" : "cancelled"}`}>{employee.active ? "Active" : "Inactive"}</span>
-              <span className={`wfBadge ${employee.pinEnabled ? "approved" : "pending"}`}>{employee.pinEnabled ? "PIN set" : "PIN required"}</span>
+              <span className={`wfBadge ${employee.pinEnabled ? "approved" : "pending"}`}>{employee.pinEnabled ? "PIN set" : "Setting up"}</span>
               <span className={`wfBadge ${employee.smsOptIn ? "approved" : "pending"}`}>{employee.smsOptIn ? "SMS enabled" : "SMS off"}</span>
               <button disabled={busy} onClick={() => editName(employee)}>Edit name</button>
               <button disabled={busy} onClick={() => void action({ action: "update-access", id: employee.id, active: !employee.active }, employee.active ? "Employee deactivated." : "Employee reactivated.")}>{employee.active ? "Deactivate" : "Reactivate"}</button>

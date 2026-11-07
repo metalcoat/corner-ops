@@ -12,6 +12,9 @@ import "./workforce.css";
 type ShiftRequest = {
   id: string;
   request_type: "Claim" | "Offer" | "Swap";
+  coverage_requested_at?: string | null;
+  late_call_out?: boolean;
+  sick_leave?: boolean;
   requester_name: string;
   target_name: string | null;
   employee_response: string;
@@ -330,7 +333,7 @@ export default function WorkforcePage() {
     {tab === "requests" && <section className="wfTwoColumn" key={`requests-${business}`}>
       <article className="workforcePanel">
         <div className="wfPanelHeader"><div><p className="wfEyebrow">Claims, offers, and swaps</p><h2>Shift requests</h2></div></div>
-        <div className="wfList">{(currentData?.shiftRequests || []).map((request) => <div className="wfRequest" key={request.id}><div><strong>{request.request_type}: {request.requester_name}</strong><span>{request.target_name ? `with ${request.target_name}` : "Manager review"}</span><small>{local(request.starts_at)} · {request.position}</small>{request.note && <p>{request.note}</p>}<small>Employee response: {request.employee_response}</small></div><div className="wfActions"><span className={`wfBadge ${request.status.toLowerCase()}`}>{request.status}</span>{request.status === "Pending" && <><button disabled={busy} onClick={() => void action({ action: "shift-request-review", id: request.id, approve: true }, "Shift request approved.").catch(() => undefined)}>Approve</button><button disabled={busy} onClick={() => void action({ action: "shift-request-review", id: request.id, approve: false }, "Shift request rejected.").catch(() => undefined)}>Reject</button></>}</div></div>)}{!currentData?.shiftRequests.length && <p className="wfEmpty">No shift requests.</p>}</div>
+        <div className="wfList">{(currentData?.shiftRequests || []).map((request) => <div className="wfRequest" key={request.id}><div><strong>{request.coverage_requested_at ? "Needs coverage" : request.request_type}: {request.requester_name}</strong><span>{request.coverage_requested_at ? (request.target_name ? `${request.target_name} will cover · approve to move the shift` : "Sent to the whole team; nobody has taken it yet") : request.target_name ? `with ${request.target_name}` : "Manager review"}</span>{request.coverage_requested_at && (request.late_call_out || request.sick_leave) && <small>{[request.late_call_out ? "Late call-out (under 4 hours)" : "", request.sick_leave ? "Sick leave (protected: no penalty)" : ""].filter(Boolean).join(" · ")}</small>}<small>{local(request.starts_at)} · {request.position}</small>{request.note && <p>{request.note}</p>}<small>Employee response: {request.employee_response}</small></div><div className="wfActions"><span className={`wfBadge ${request.status.toLowerCase()}`}>{request.status}</span>{request.status === "Pending" && <><button disabled={busy} onClick={() => void action({ action: "shift-request-review", id: request.id, approve: true }, "Shift request approved.").catch(() => undefined)}>Approve</button><button disabled={busy} onClick={() => void action({ action: "shift-request-review", id: request.id, approve: false }, "Shift request rejected.").catch(() => undefined)}>Reject</button></>}</div></div>)}{!currentData?.shiftRequests.length && <p className="wfEmpty">No shift requests.</p>}</div>
       </article>
       <article className="workforcePanel">
         <div className="wfPanelHeader"><div><p className="wfEyebrow">Requested days away</p><h2>Time off</h2></div></div>

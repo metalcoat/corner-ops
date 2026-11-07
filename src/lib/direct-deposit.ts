@@ -132,7 +132,7 @@ async function notifyOwner(input: {
       subject: input.subject,
       text: [
         ...input.lines,
-        base ? `Review securely: ${base}/ops/direct-deposit` : "Open People > Direct deposit onboarding to review securely.",
+        base ? `Review securely: ${base}/ops/people/paperwork/direct-deposit` : "Open People > Paperwork > Direct deposit to review securely.",
         "",
         "Full routing and account numbers are intentionally excluded from email.",
       ].join("\n"),

@@ -128,7 +128,7 @@ test("ordinary administrator review remains redacted", async () => {
     "next/server": { NextResponse: Response }, "@/lib/rate-limit": { clientIp: () => "203.0.113.9" }, "@/lib/auth": { ...auth, getSession: async () => identity("Owner") },
     "@/lib/db": { getSql: () => async () => [] },
     "@/lib/employment-forms": { getEmploymentForm: async () => completed, ensureEmploymentFormsSchema: async () => undefined },
-    "@/lib/sensitive-redaction": { redactEmploymentSensitiveData }, "@/lib/i9-validation": {},
+    "@/lib/sensitive-redaction": { redactEmploymentSensitiveData }, "@/lib/i9-validation": {}, "@/lib/staff-notifications": {},
   });
   const response = await route.GET({ nextUrl: new URL(`https://ops.example.invalid/api/employment-forms?business=Tiki&id=${id}`) });
   assert.equal(response.status, 200); assert.doesNotMatch(await response.text(), /000-12-3456/);
@@ -154,6 +154,7 @@ test("scoped employment reader decrypts the original saved answers without chang
       encrypted_payload: `v1.${iv.toString("base64url")}.${cipher.getAuthTag().toString("base64url")}.${encrypted.toString("base64url")}` };
     const library = loadSource("src/lib/employment-forms.ts", {
       "@/lib/secret-strength": { requireStrongSecret },
+      "@/lib/ny-tipped-wage": { nyFoodServiceRates: () => ({ minimumCents: 1600, cashWageCents: 1070, tipCreditCents: 530 }), tippedOvertimeRateCents: () => 1870 },
       "@/lib/db": { ensureSchema: async () => undefined, getSql: () => async (sql: TemplateStringsArray, ...params: unknown[]) => {
         if (!sql.join("?").includes("WHERE id = ? AND business = ?")) return [];
         assert.match(sql.join("?"), /WHERE id = \? AND business = \?/);

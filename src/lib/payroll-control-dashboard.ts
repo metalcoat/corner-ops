@@ -1,3 +1,5 @@
+import { nyFoodServiceRates, tipCreditShortfallCents, tippedFullRateCents, tippedOvertimeRateCents } from "@/lib/ny-tipped-wage";
+import { overtimePayCents, weightedAverageOvertimeCents } from "@/lib/payroll-overtime-rules";
 import { getSql } from "@/lib/db";
 import {
   controlledPayrollSummary,
@@ -100,8 +102,47 @@ export async function safePayrollControlDashboard(business: Business, weekStart:
     LIMIT 100
   ` as unknown as Array<Record<string, unknown>>;
 
+  // Drivers: cash wage + delivery tips for their tipped hours must reach the full NY minimum (tip credit check).
+  const year = Number(weekStart.slice(0, 4)) || new Date().getFullYear();
+  const rates = business === "Corner Deli"
+    ? await getSql()`SELECT name, hourly_rate, tipped_rate FROM employees WHERE business = ${business}` as unknown as Array<{ name: string; hourly_rate: string | number; tipped_rate: string | number }>
+    : [];
+  const tippedRateByName = new Map(rates.map((row) => [String(row.name).trim().toLowerCase(), Math.round(Number(row.tipped_rate || 0) * 100)]));
+  const regularRateByName = new Map(rates.map((row) => [String(row.name).trim().toLowerCase(), Math.round(Number(row.hourly_rate || 0) * 100)]));
+  // Second overtime rule: overtime priced by the role each hour past 40 fell in.
+  // By-role overtime needs the employee's signed agreement (two-rate pay notice); otherwise the weighted average applies.
+  const agreed = business === "Corner Deli"
+    ? new Set((await getSql()`
+        SELECT DISTINCT LOWER(BTRIM(e.name)) AS name FROM employment_forms f JOIN employees e ON e.id = f.employee_id
+        WHERE f.business = ${business} AND f.form_type = 'PAY_NOTICE' AND f.overtime_by_role_agreement AND f.status IN ('Employee Signed', 'Completed')
+      ` as unknown as Array<{ name: string }>).map((row) => row.name))
+    : new Set<string>();
+  const overtimeByRole = ((summary.rows || []) as Array<{ employee: string; overtimeRegularHours?: number; overtimeTippedHours?: number; straightRegularHoursByRole?: number; straightTippedHoursByRole?: number }>)
+    .filter((row) => Number(row.overtimeRegularHours || 0) + Number(row.overtimeTippedHours || 0) > 0)
+    .map((row) => {
+      const key = String(row.employee).trim().toLowerCase();
+      const regularRateCents = regularRateByName.get(key) || 0;
+      const tippedRate = tippedRateByName.get(key) || 0;
+      const tippedOtRateCents = tippedRate ? tippedOvertimeRateCents(tippedRate, year) : Math.round(1.5 * regularRateCents);
+      const split = { regularStraightHours: Number(row.straightRegularHoursByRole || 0), tippedStraightHours: Number(row.straightTippedHoursByRole || 0), regularOvertimeHours: Number(row.overtimeRegularHours || 0), tippedOvertimeHours: Number(row.overtimeTippedHours || 0) };
+      const pay = overtimePayCents(split, { regularRateCents, tippedOvertimeRateCents: tippedOtRateCents });
+      const signedAgreement = agreed.has(key);
+      const weightedCents = weightedAverageOvertimeCents(split, { regularRateCents, tippedCashRateCents: tippedRate || regularRateCents, tippedFullRateCents: tippedRate ? tippedFullRateCents(tippedRate, year) : regularRateCents });
+      return { employee: row.employee, inStoreHours: split.regularOvertimeHours, inStoreRateCents: Math.round(1.5 * regularRateCents), drivingHours: split.tippedOvertimeHours, drivingRateCents: tippedOtRateCents, ...pay, signedAgreement, weightedCents, payCents: signedAgreement ? pay.totalCents : weightedCents };
+    });
+  const tipCreditShortfalls = ((summary.rows || []) as Array<{ employee: string; driverTipHours?: number; deliveryTips?: number }>)
+    .map((row) => {
+      const tippedRateCents = tippedRateByName.get(String(row.employee).trim().toLowerCase()) || 0;
+      const shortfallCents = tipCreditShortfallCents({ tippedHours: Number(row.driverTipHours || 0), tippedRateCents, tipsCents: Math.round(Number(row.deliveryTips || 0) * 100), year });
+      return { employee: row.employee, tippedHours: Number(row.driverTipHours || 0), tippedRateCents, deliveryTipsCents: Math.round(Number(row.deliveryTips || 0) * 100), shortfallCents };
+    })
+    .filter((row) => row.shortfallCents > 0);
+
   return {
     summary,
+    tipCreditShortfalls,
+    overtimeByRole,
+    minimumWageCents: nyFoodServiceRates(year).minimumCents,
     punches: (punches as unknown as Array<Record<string, unknown>>).map((row) => {
       const clockIn = timestamp(row.clock_in);
       const clockOut = timestamp(row.clock_out);

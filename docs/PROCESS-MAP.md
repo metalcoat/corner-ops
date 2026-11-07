@@ -440,6 +440,76 @@ notifications. Sideloaded from `https://dev.ordercornerdeli.com/downloads/corner
 `tools/team-app/publish-dev.sh`). The URL bar only goes away when production serves `public/.well-known/assetlinks.json`
 on the team domain (allowed in `src/lib/team-domain-routing.ts`). Signing key: `~/.config/corner-ops/team-app.jks`.
 
+## 8b-2. People section and new-hire onboarding
+
+Ops menu **People** has one row of tabs on every People page (`src/app/global-nav.tsx`):
+Team (`/ops/people/team`, each person at `/ops/people/team/<id>?business=…` with Onboarding, Profile & access,
+Paperwork, Pay & payroll, Schedule tabs) · Add employee (`/ops/people/add`) · Paperwork (`/ops/people/paperwork`,
+direct deposit at `/ops/people/paperwork/direct-deposit`) · Handbook (`/ops/people/handbook`, Corner Deli) ·
+Schedule (`/ops/workforce`) · Attendance (`/ops/attendance`) · Payroll (`/ops/payroll-control`).
+The old URLs `/ops/employees`, `/ops/employment-forms`, `/ops/direct-deposit`, `/ops/employee-handbook` redirect
+(`next.config.ts`).
+
+```mermaid
+flowchart LR
+  add["Add employee: name, mobile, consent<br/>(role, rate optional)"] --> emp[(employees: no PIN yet,<br/>pin_enabled false)]
+  add --> pk["forms packet (W-4, IT-2104, I-9, meal;<br/>pay notice if a rate was given)<br/>+ direct-deposit election"]
+  add --> inv[(employee_onboarding_invites<br/>SHA-256 of token, 7 days)]
+  inv --> sms["one text (Telnyx) with /employee/welcome/&lt;token&gt;<br/>off production: logged, link shown to manager"]
+  sms --> wel["new hire picks own PIN → signed in<br/>checklist: forms · handbook · direct deposit · app"]
+  wel --> hub["existing Employee Hub pages<br/>/employee/forms, /handbook, /direct-deposit"]
+  emp --> chk["manager checklist (Team, People, person page)<br/>Resend text = new link, old one revoked"]
+  chk --> pr["Payroll Relief: owner adds them on the site,<br/>refreshes the list and matches on Payroll"]
+```
+
+- **Production (hand deploy 2026-11-06, Chris's go-ahead):** ported into `production/release` (Payroll Relief step
+  hidden there; no `employee_pin_audit`), migrations 0040–0042 applied by hand and recorded in `schema_migrations`.
+  Before-copy `production/release-before-people-onboarding`, image `corner-ops-prod-app:before-people-onboarding`,
+  backup `cornerops-20261106T204005Z.dump`. Rollback: put the before-copy back as `release`, tag the before image
+  `:latest`, `up -d --no-deps app` (new tables are ignored by the old code). Reminders ride production's
+  existing 5-minute schedule-delivery crontab entry.
+- Code: `src/lib/employee-onboarding.ts` (database), `employee-onboarding-rules.ts` (token, text, checklist),
+  APIs `/api/employee-directory/onboarding` (managers, workforce permission) and `/api/employee/onboarding` (the link).
+- Text log-only: no Telnyx settings, or `ONBOARDING_SMS_LOG_ONLY=true`; numbers in `SMS_TEST_NUMBERS` still send.
+- The new hire's steps run in order (PIN → forms → handbook → schedule app; direct deposit optional): a later
+  step shows locked until the earlier one is done. Every Employee Hub page shows a "setup isn't finished" banner
+  (`/employee/setup` is the signed-in checklist).
+- Daily reminder text from the day after the setup text, 10 AM–7 PM Eastern, at most 7
+  (`employee_onboarding_reminders`, migration 0041), sent by the every-5-minute `schedule-delivery` cron. Before
+  the PIN is chosen it carries a fresh setup link; after, `/employee/setup`. It says they can't be scheduled yet.
+- Scheduling gate (`assertOnboardingAllowsScheduling`, `src/lib/workforce.ts`): a person who came in through Add
+  employee can't be given a shift (create, edit, open-shift claim) until their own steps are done. Staff never
+  sent a setup link are unaffected. Store-side items (I-9 review, Payroll Relief match) don't block scheduling.
+- "Schedule app" is done once they sign in with their PIN from the app or Hub (`app_signed_in_at`, migration 0042,
+  set by `POST /api/employee/session`). Payroll Relief's step shows only where its tables exist (not production yet).
+- A link works for one person only; a resend revokes the older link. After the PIN is chosen the link needs that
+  person's PIN to show the checklist again. Nothing is uploaded to Payroll Relief.
+- Call-outs (handbook section 3): text the manager 4+ hours ahead, then "I need coverage" on the shift in the team app
+  (`src/lib/shift-coverage.ts`, migration 0045): a post in the team group chat as the employee (with the app notification),
+  never the reason; a coworker taps "I'll take it" (first wins) and a manager approves on Schedule → Requests, which
+  moves the shift. Late (<4 h) and sick-leave flags show only to managers. Handbook page has "Send to N who haven't
+  signed" (app message, notification, email, text where consented), refused while the version is a draft.
+- Drivers (tipped): NY food service rates in `src/lib/ny-tipped-wage.ts` (2026 rest of state: $16.00 minimum,
+  $10.70 cash wage, $5.30 tip credit; add each new year's row). Add employee and the Pay tab refuse a driver rate under
+  the cash wage; the pay notice is LS55 with both rates and the tip credit. Payroll shows "Driver pay below minimum
+  wage" when a driver's tipped rate × driving hours + delivery tips is under the minimum for those hours.
+  The 2-hour/20% non-tipped-work rule is handled by paying non-delivery time at the regular rate (handbook section 7).
+- Second overtime rule (2026-11-07, `src/lib/payroll-overtime-rules.ts`): hours past 40 are taken in the order worked
+  and belong to the role at that moment (driver shifts are tipped after 3 PM, as for TipWa). In-store overtime is
+  1.5 × regular; driving overtime is driver rate + ½ minimum while a tip credit is taken (2026: $10.70 → $18.70).
+  Payroll shows "Overtime by role" with pay per role; the LS55 pay notice lists both overtime rates.
+  By-role pricing needs the employee's signed agreement (29 CFR 778.419): it is on the two-rate pay notice
+  (`employment_forms.overtime_by_role_agreement`, migration 0046) and in handbook section 7. Without a signed one,
+  Payroll shows the weighted-average overtime (29 CFR 778.115) to pay instead.
+  Paperwork → "Send overtime agreement to drivers" issues every active employee with a driver rate who hasn't signed
+  it an updated pay notice (same rates + agreement, `noticeKind: overtime-agreement`) and a Hub message to sign it.
+  Payroll Relief: driving overtime goes in its own timesheet column `TipOT` (env `PAYROLL_RELIEF_DRIVER_OT_CODE`)
+  once Chris adds that earnings code; in-store overtime stays in `OT`. Without the column all overtime goes in
+  `OT` with a note on the plan. Scheduler: anyone over 40 shows which shifts the overtime lands on and suggests
+  putting driving last in the week (`src/lib/schedule-overtime-hint.ts`); it never blocks.
+- Handbook sections 3 (call-outs), 5 (breaks), 13 (alcohol, zero tolerance) and 14 (no smoking/vaping) are marked draft until Chris approves
+  the wording; any handbook change asks every employee to sign again.
+
 ## 8c. Delivery car tablet (Corner Deli, dev)
 
 ```mermaid
@@ -603,6 +673,11 @@ flowchart LR
   Changing the amount of a topping on one pizza half preserves the other half. Tiki tabs and employee meals
   use the same size/allowance calculation; employee meal consumption and kitchen submission commit together,
   and inventory is depleted once.
+- Employee drinks at cost (dev, 2026-11-06): 🥤 in the deli toolbar (DRINK in the shared POS bar) for the signed-in PIN
+  employee. Only the "12 - 20 oz Soda" and "2 Liter" categories. Price = (cost + bottle deposit) × (1 + tax), rounded up
+  to the next $0.25 (20 oz $1.29 → $1.50, 2 L $2.00 → $2.25; `ordering-employee-drink-rules.ts`); costs in `ordering_employee_drink_prices` (migration 0043),
+  edited in POS settings > Operations. The order goes in at menu price (stock comes off on submit), the difference
+  becomes a discount so sales tax is on what the employee paid, then checkout opens. API `/api/ordering/employee-drinks`.
 - Guest carts never change the login email of an existing customer matched by phone. Rewards require both the
   authenticated customer and ownership of the current web cart.
 - Online card confirmation locks the order while recording payment and checks for a previously recorded tender

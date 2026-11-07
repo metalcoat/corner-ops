@@ -192,6 +192,7 @@ function isDeliPosApi(path: string): boolean {
       "calls",
       "availability",
       "employee-meals",
+      "employee-drinks",
       "customer-credits",
       "brand-logo",
       "inventory",

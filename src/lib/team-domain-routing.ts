@@ -6,7 +6,7 @@ const TEAM_PAGES = [
   "/ops/attendance", "/ops/direct-deposit", "/ops/employee-handbook",
   "/ops/employees", "/ops/employment-forms", "/ops/messages",
   "/ops/overtime", "/ops/payroll-control", "/ops/payroll-tip-audit",
-  "/ops/workforce", "/ops/tiki-time-corrections",
+  "/ops/workforce", "/ops/tiki-time-corrections", "/ops/people",
 ];
 
 function within(pathname: string, prefix: string): boolean {

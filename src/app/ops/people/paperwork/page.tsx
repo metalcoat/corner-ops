@@ -5,7 +5,7 @@ import CompletedFormView from "./completed-form-view";
 import { canViewCompletedEmploymentForms } from "@/lib/employment-form-display";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
-import "../control-center.css";
+import "../../control-center.css";
 import "./employment-forms.css";
 
 type Employee = { id: string; name: string; position: string; hourlyRate: number; tippedRate: number };
@@ -250,7 +250,7 @@ export default function EmploymentFormsPage() {
   if (!session.authenticated) return <main className="controlPage"><a href="/signin">Sign in to Corner Ops</a></main>;
 
   return <main className="controlPage employmentAdminPage">
-    <header className="controlHeader"><div><p className="eyebrow">Onboarding, tax, identity, and wage records</p><h1>{business} employment forms</h1><p>Assign official-form versions, collect employee signatures, issue pay-rate changes, and preserve an immutable audit history.</p></div><div className="controlActions"><div className="businessPills">{allowedBusinesses.map((name) => <button key={name} className={business === name ? "active" : ""} onClick={() => setBusiness(name)}>{name}</button>)}</div><a href="/employee/forms">Employee view</a></div></header>
+    <header className="controlHeader"><div><p className="eyebrow">Onboarding, tax, identity, and wage records</p><h1>{business} paperwork</h1><p>New-hire forms (W-4, IT-2104, I-9, pay notice, meal policy), I-9 review, pay-rate change notices and direct deposit. Add employee assigns the packet automatically.</p></div><div className="controlActions"><div className="businessPills">{allowedBusinesses.map((name) => <button key={name} className={business === name ? "active" : ""} onClick={() => setBusiness(name)}>{name}</button>)}</div><a href="/ops/people/paperwork/direct-deposit">Direct deposit</a><a href="/employee/forms">Employee view</a>{business === "Corner Deli" && <button type="button" disabled={busy} onClick={() => { if (window.confirm("Send every driver who hasn't signed it an updated NY pay notice with the overtime-by-job agreement? Their rates stay the same; each gets a message to sign it in the app.")) void action({ action: "send-overtime-agreements" }, "Overtime agreement sent to every driver who hadn't signed it."); }}>Send overtime agreement to drivers</button>}</div></header>
     {notice && <div className="noticeBar">{notice}</div>}
     {!data && <section className="controlCard">Loading records…</section>}
     {data && <>

@@ -17,8 +17,8 @@ test("owner session persists across local HTTP navigation", async ({ page, conte
   const sessionResponse = await page.request.get("/api/auth/session");
   expect(sessionResponse.status()).toBe(200);
   expect((await sessionResponse.json()).authenticated).toBe(true);
-  await page.goto("/ops/employees");
-  await expect(page.getByRole("heading", { name: "Employees", exact: true })).toBeVisible();
+  await page.goto("/ops/people/team");
+  await expect(page.getByRole("heading", { name: "Team", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Owner access required" })).toHaveCount(0);
 
   const cookie = (await context.cookies()).find((item) => item.name === "corner_ops_session");

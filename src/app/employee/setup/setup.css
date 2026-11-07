@@ -1,0 +1,17 @@
+.welcomeShell .welcomeForm { display: grid; gap: 12px; max-width: 320px; }
+.welcomeShell .welcomeForm label { display: grid; gap: 4px; font-weight: 600; }
+.welcomeShell .welcomeForm input { font-size: 1.4rem; letter-spacing: 0.4em; padding: 10px 12px; border: 1px solid var(--border, #c8c8c8); border-radius: 8px; background: var(--panel-2, transparent); color: inherit; }
+.welcomeSteps { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 12px; }
+.welcomeStep { display: grid; grid-template-columns: 32px 1fr; gap: 12px; align-items: start; padding: 12px; border: 1px solid var(--border, #d4d4d4); border-radius: 10px; }
+.welcomeStep > div { display: grid; gap: 6px; justify-items: start; }
+.welcomeStep small { color: inherit; opacity: 0.78; }
+.welcomeMark { width: 28px; height: 28px; border-radius: 50%; border: 2px solid currentColor; opacity: 0.6; display: grid; place-items: center; font-weight: 700; }
+.welcomeStep.done .welcomeMark { background: #1f7a3d; border-color: #1f7a3d; color: #fff; opacity: 1; }
+.welcomeStep.done { background: rgba(31, 122, 61, 0.16); border-color: rgba(31, 122, 61, 0.6); }
+.welcomeApp { display: grid; gap: 6px; justify-items: start; }
+.welcomeStep.locked { opacity: 0.55; }
+.setupWarning, .setupDone { margin: 0 0 14px; padding: 12px 14px; border-radius: 10px; line-height: 1.45; }
+.setupWarning { background: rgba(180, 83, 9, 0.16); border: 1px solid rgba(180, 83, 9, 0.6); }
+.setupDone { background: rgba(31, 122, 61, 0.16); border: 1px solid rgba(31, 122, 61, 0.6); }
+.setupBanner { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin: 0 0 14px; padding: 12px 14px; border-radius: 10px; background: rgba(180, 83, 9, 0.16); border: 1px solid rgba(180, 83, 9, 0.6); }
+.setupBanner a { font-weight: 800; }

@@ -3,7 +3,7 @@
 import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
-import "../control-center.css";
+import "../../../control-center.css";
 import "./direct-deposit.css";
 
 type Employee = { id: string; name: string; position: string };
@@ -135,7 +135,7 @@ export default function DirectDepositAdminPage() {
   if (!session.authenticated) return <main className="controlPage"><a href="/signin">Sign in to Corner Ops</a></main>;
 
   return <main className="controlPage ddAdminPage">
-    <header className="controlHeader"><div><p className="eyebrow">Encrypted payroll banking onboarding</p><h1>{business} direct deposit</h1><p>Assign voluntary payment-method elections, review signed bank details, and copy the information into payroll without storing it in ordinary employee screens.</p></div><div className="controlActions"><div className="businessPills">{allowedBusinesses.map((name) => <button key={name} className={business === name ? "active" : ""} onClick={() => setBusiness(name)}>{name}</button>)}</div><a href="/ops/employment-forms">Employment forms</a></div></header>
+    <header className="controlHeader"><div><p className="eyebrow">Encrypted payroll banking onboarding</p><h1>{business} direct deposit</h1><p>Assign voluntary payment-method elections, review signed bank details, and copy the information into payroll without storing it in ordinary employee screens.</p></div><div className="controlActions"><div className="businessPills">{allowedBusinesses.map((name) => <button key={name} className={business === name ? "active" : ""} onClick={() => setBusiness(name)}>{name}</button>)}</div><a href="/ops/people/paperwork">Back to paperwork</a></div></header>
     {notice && <div className="noticeBar">{notice}</div>}
     {!data && <section className="controlCard">Loading records…</section>}
     {data && <>

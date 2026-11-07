@@ -1,3 +1,4 @@
+import { splitOvertimeByRole, type WorkSegment } from "@/lib/payroll-overtime-rules";
 import { getSql } from "@/lib/db";
 import { newYorkDateTime, payrollWeekBounds as weekBounds } from "@/lib/payroll-week";
 import { allocateSquareTipAfterFee } from "@/lib/square-tip-fee";
@@ -268,6 +269,28 @@ function rowFor(summary: Map<string, SummaryRow>, employeeName: string): Summary
   };
   summary.set(employee, row);
   return row;
+}
+
+/** Each employee's worked time in order, split where a driver shift turns tipped (after 3 PM). */
+function workSegments(shifts: Shift[]): Map<string, WorkSegment[]> {
+  const segments = new Map<string, WorkSegment[]>();
+  for (const shift of shifts) {
+    if (!shift.employeeName || /^cover$/i.test(shift.employeeName)) continue;
+    const employee = canonicalEmployeeName(shift.employeeName);
+    const list = segments.get(employee) || [];
+    const tippedHours = driverHoursAfterThree(shift);
+    const total = durationHours(shift);
+    const start = shift.clockIn || shift.clockOut || new Date(0);
+    if (tippedHours > 0 && shift.clockIn && shift.clockOut) {
+      const tippedStart = new Date(shift.clockOut.getTime() - tippedHours * 3_600_000);
+      if (total - tippedHours > 0) list.push({ start, hours: total - tippedHours, tipped: false });
+      list.push({ start: tippedStart, hours: tippedHours, tipped: true });
+    } else {
+      list.push({ start, hours: total, tipped: false });
+    }
+    segments.set(employee, list);
+  }
+  return segments;
 }
 
 function summarizeShifts(shifts: Shift[]) {
@@ -889,6 +912,7 @@ export async function payrollSummary(business: Business, weekStart: string) {
     };
   });
 
+  const segmentsByEmployee = workSegments(shifts);
   const rows = [...summary.values()]
     .map((row) => {
       const hours = Math.round(row.hours * 100) / 100;
@@ -896,12 +920,18 @@ export async function payrollSummary(business: Business, weekStart: string) {
       const straightTimeHours = Math.round(Math.max(0, hours - overtimeHours) * 100) / 100;
       const driverTipHours = Math.round(Math.min(row.driverTipHours, straightTimeHours) * 100) / 100;
       const regularHours = Math.round(Math.max(0, straightTimeHours - driverTipHours) * 100) / 100;
+      // Second overtime rule: which role each hour past 40 fell in (in the order worked).
+      const byRole = splitOvertimeByRole(segmentsByEmployee.get(row.employee) || []);
       return {
         ...row,
         hours,
         driverTipHours,
         regularHours,
         overtimeHours,
+        overtimeRegularHours: byRole.regularOvertimeHours,
+        overtimeTippedHours: byRole.tippedOvertimeHours,
+        straightRegularHoursByRole: byRole.regularStraightHours,
+        straightTippedHoursByRole: byRole.tippedStraightHours,
         tipsBeforeFee: Math.round(row.tipsBeforeFee * 100) / 100,
         pickupTipsBeforeFee: Math.round(row.pickupTipsBeforeFee * 100) / 100,
         deliveryTipsBeforeFee: Math.round(row.deliveryTipsBeforeFee * 100) / 100,

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "../control-center.css";
 import "./people.css";
+import OnboardingChecklist, { type OnboardingStatus } from "./onboarding-checklist";
 
 const STORAGE_KEY = "corner-ops-business-theme";
 
@@ -13,6 +14,8 @@ export default function PeoplePage() {
   const siteBusiness: Business | null = brand.name === "At the Docks" ? "Tiki" : brand.name === "Corner Deli" ? "Corner Deli" : null;
   const [session, setSession] = useState<SessionView | null>(null);
   const [business, setBusiness] = useState<Business>(siteBusiness || "Corner Deli");
+  const [inProgress, setInProgress] = useState<OnboardingStatus[] | null>(null);
+  const [refresh, setRefresh] = useState(0);
 
   useEffect(() => {
     if (!siteBusiness) {
@@ -42,53 +45,39 @@ export default function PeoplePage() {
 
   const groups = useMemo(() => [
     {
-      eyebrow: "Plan and communicate",
-      title: "Workforce",
-      description: "Build and publish schedules, review time-off and shift requests, and manage day-to-day staffing.",
-      links: [
-        { label: "Schedule & workforce", href: "/ops/workforce", primary: true },
-        { label: "Team messages", href: "/ops/messages" },
-        { label: "Employees", href: "/ops/employees" },
-      ],
-    },
-    {
-      eyebrow: "Hire, document, and acknowledge",
-      title: "Employment forms",
+      eyebrow: "Who works here",
+      title: "Team & paperwork",
       description: business === "Corner Deli"
-        ? "Assign onboarding forms, collect employee signatures, complete I-9 employer review, manage the Corner Deli handbook acknowledgments, issue New York pay-rate notices, and securely collect voluntary direct-deposit elections."
-        : "Assign onboarding forms, collect employee signatures, complete I-9 employer review, issue New York pay-rate notices, and securely collect voluntary direct-deposit elections.",
+        ? "Add a new hire with just a name and phone; they get one text to set up their account, forms, handbook, direct deposit and the schedule app. Open anyone on Team for their profile, PIN, paperwork and pay."
+        : "Add a new hire with just a name and phone; they get one text to set up their account, forms, direct deposit and the schedule app. Open anyone on Team for their profile, PIN, paperwork and pay.",
       links: [
-        { label: "Manage employment forms", href: "/ops/employment-forms", primary: true },
-        ...(business === "Corner Deli" ? [{ label: "Handbook & signatures", href: "/ops/employee-handbook" }] : []),
-        { label: "Direct deposit onboarding", href: "/ops/direct-deposit" },
-        { label: "Employee-facing forms", href: "/employee/forms" },
-        ...(business === "Corner Deli" ? [{ label: "Employee-facing handbook", href: "/employee/handbook" }] : []),
+        { label: "Team", href: "/ops/people/team", primary: true },
+        { label: "Add employee", href: "/ops/people/add" },
+        { label: "Paperwork (forms, I-9 review, direct deposit)", href: "/ops/people/paperwork" },
+        ...(business === "Corner Deli" ? [{ label: "Handbook & signatures", href: "/ops/people/handbook" }] : []),
       ],
     },
     {
-      eyebrow: "Time and exceptions",
-      title: "Attendance",
-      description: "Review punches, late arrivals, missing clock-outs, source imports, and exceptions before payroll.",
-      links: business === "Tiki"
-        ? [
-            { label: "Attendance review", href: "/ops/attendance", primary: true },
-            { label: "Tiki employee clock", href: "/clock" },
-          ]
-        : [
-            { label: "Attendance review", href: "/ops/attendance", primary: true },
-            { label: "Rezku delivery monitor", href: "/ops/rezku-monitor" },
-          ],
-    },
-    {
-      eyebrow: "Correct, calculate, and approve",
-      title: "Payroll control",
-      description: "Correct payroll shifts, recalculate hours and tips, allocate exceptions, create versions, and lock the final weekly run in one place.",
+      eyebrow: "Schedule, time and pay",
+      title: "Time & pay",
+      description: "Build and publish the schedule, handle requests and time off, review punches, then correct and approve payroll (Payroll Relief matching lives on Payroll).",
       links: [
-        { label: "Open payroll control", href: "/ops/payroll-control", primary: true },
-        { label: "Employee Hub", href: "/employee" },
+        { label: "Schedule & requests", href: "/ops/workforce", primary: true },
+        { label: "Attendance review", href: "/ops/attendance" },
+        { label: "Payroll", href: "/ops/payroll-control" },
+        ...(business === "Tiki" ? [{ label: "Tiki employee clock", href: "/clock" }] : []),
       ],
     },
   ], [business]);
+
+  useEffect(() => {
+    if (!session?.authenticated) return;
+    setInProgress(null);
+    fetch(`/api/employee-directory/onboarding?business=${encodeURIComponent(business)}`, { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : { inProgress: [] })
+      .then((payload: { inProgress: OnboardingStatus[] }) => setInProgress(payload.inProgress || []))
+      .catch(() => setInProgress([]));
+  }, [business, session?.authenticated, refresh]);
 
   if (!session) return <main className="controlPage peoplePage">Loading people operations…</main>;
   if (!session.authenticated) return <main className="controlPage peoplePage"><a href="/signin">Sign in to Corner Ops</a></main>;
@@ -96,9 +85,9 @@ export default function PeoplePage() {
   return <main className="controlPage peoplePage">
     <header className="controlHeader">
       <div>
-        <p className="eyebrow">People operations</p>
-        <h1>{business} schedule, attendance, and payroll</h1>
-        <p>This is the single starting point for employee work. Business-specific tools stay with the business they actually belong to, a concept apparently requiring active enforcement.</p>
+        <p className="eyebrow">People</p>
+        <h1>{business} team</h1>
+        <p>Hire and document people on the left; schedule, time and payroll on the right. The bar above takes you to each page.</p>
       </div>
       <div className="controlActions">
         <div className="businessPills" aria-label="Business">
@@ -108,8 +97,15 @@ export default function PeoplePage() {
     </header>
 
     <section className="peopleFlow" aria-label="People workflow">
-      <span>1. Hire & document</span><i>→</i><span>2. Schedule</span><i>→</i><span>3. Review time</span><i>→</i><span>4. Correct & recalculate payroll</span>
+      <span>1. Add employee</span><i>→</i><span>2. They set up by text</span><i>→</i><span>3. Schedule</span><i>→</i><span>4. Review time</span><i>→</i><span>5. Approve payroll</span>
     </section>
+
+    {inProgress && inProgress.length > 0 && <section className="controlCard peopleOnboarding">
+      <p className="eyebrow">New hires in progress</p>
+      <div className="onboardingGrid">
+        {inProgress.map((status) => <OnboardingChecklist key={status.employeeId} business={business} status={status} onChanged={() => setRefresh((value) => value + 1)} />)}
+      </div>
+    </section>}
 
     <section className="peopleGrid">
       {groups.map((group) => <article className="controlCard peopleCard" key={group.title}>
