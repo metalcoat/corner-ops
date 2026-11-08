@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Chris 2026-11-08: new candy from Amazon (arriving 2026-11-10) sells at $2.00 each (menu prices include tax):
-// Twix, Peanut M&M's, Crunch, Sour Patch Kids (2 oz), Swedish Fish (2 oz), Reese's Cups, Snickers.
-// Missing ones are added to Candy Bars like the existing bars; those seven are set to $2.00. Other candy prices
+// Twix, Peanut M&M's, Crunch, Sour Patch Kids (2 oz), Swedish Fish (2 oz), Reese's Cups, Snickers, and then
+// Skittles Sour, Skittles Tropical and Hershey's.
+// Missing ones are added to Candy Bars like the existing bars; those are set to $2.00. Other candy prices
 // are left alone. Every candy item also gets a product photo from scripts/assets/candy-images/.
 // Rerunnable: items, prices, aliases and photos already in place are left alone (a photo uploaded by hand is
 // never replaced). A photo row whose file is missing from the uploads volume gets its file written back.
@@ -32,7 +33,7 @@ type Candy = {
   match: string[]; // existing names that count as this item (lowercase)
   image: string;
   alt: string;
-  priced?: boolean; // one of the seven new candies: create if missing, $2.00
+  priced?: boolean; // one of the new candies: create if missing, $2.00
   aliases?: string[];
 };
 
@@ -44,6 +45,10 @@ const CANDY: Candy[] = [
   { name: "Swedish Fish", match: ["swedish fish"], image: "swedish-fish.jpg", alt: "Swedish Fish 2 oz bag", priced: true },
   { name: "Reeses", match: ["reeses", "reese's", "reese's cups", "reeses cups"], image: "reeses.jpg", alt: "Reese's Peanut Butter Cups", priced: true, aliases: ["Reese's Cups", "Reese's Peanut Butter Cups", "Peanut Butter Cups"] },
   { name: "Snickers", match: ["snickers"], image: "snickers.jpg", alt: "Snickers bar", priced: true },
+  // Chris 2026-11-08 (later the same day): also these three, $2.00.
+  { name: "Skittles Sour", match: ["skittles sour", "sour skittles"], image: "skittles-sour.jpg", alt: "Sour Skittles bag", priced: true, aliases: ["Sour Skittles"] },
+  { name: "Skittles Tropical", match: ["skittles tropical", "tropical skittles"], image: "skittles-tropical.jpg", alt: "Skittles Tropical bag", priced: true, aliases: ["Tropical Skittles"] },
+  { name: "Hershey's", match: ["hershey's", "hersheys", "hershey's milk chocolate", "hershey bar"], image: "hersheys.jpg", alt: "Hershey's Milk Chocolate bar", priced: true, aliases: ["Hersheys", "Hershey Bar", "Hershey's Bar", "Hershey's Chocolate", "Hershey's Milk Chocolate"] },
   { name: "Milky Way", match: ["milky way"], image: "milky-way.jpg", alt: "Milky Way bar" },
   { name: "Starburst", match: ["starburst"], image: "starburst.jpg", alt: "Starburst Original fruit chews" },
   { name: "3 Musketeers", match: ["3 musketeers"], image: "3-musketeers.jpg", alt: "3 Musketeers bar" },

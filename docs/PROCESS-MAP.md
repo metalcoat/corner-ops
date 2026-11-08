@@ -206,9 +206,9 @@ flowchart LR
     pickles too (owner rule 2026-10-25). Set up by `scripts/configure-burger-deluxe.ts` (rerunnable; CI runs it on the
     menu fixture), checked by `npm run test:burger-deluxe`.
   - Pepperoni Chicken Parmesan Sub $12.50 (was $11.50): `scripts/configure-pepperoni-parm-price.ts` (rerunnable).
-- Candy (Chris 2026-11-08, dev): Peanut M&M's, Sour Patch Kids, Swedish Fish and Snickers added to Candy Bars at
-  $2.00 like the other bars (Twix, Nestle Crunch, Reeses were already $2.00), with AI aliases such as "Reese's Cups"
-  and "Crunch Bar". All 15 candy items got a product photo (`ordering_menu_media`, files in the app's
+- Candy (Chris 2026-11-08, dev): Peanut M&M's, Sour Patch Kids, Swedish Fish, Snickers, Skittles Sour, Skittles
+  Tropical and Hershey's added to Candy Bars at $2.00 like the other bars (Twix, Nestle Crunch, Reeses were already
+  $2.00), with AI aliases such as "Reese's Cups", "Crunch Bar", "Sour Skittles" and "Hershey Bar". All 18 candy items got a product photo (`ordering_menu_media`, files in the app's
   `/data/uploads` volume) from `scripts/assets/candy-images/`. `scripts/configure-candy-bars.ts` (rerunnable) does
   it, writing the photos through `docker exec` into the app container. A menu copy that brings the media rows but
   not the uploads volume shows broken photos until the script is run again; it writes back its own missing files.
