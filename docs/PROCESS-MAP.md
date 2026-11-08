@@ -520,7 +520,7 @@ flowchart LR
   set by `POST /api/employee/session`). Payroll Relief's step shows only where its tables exist (not production yet).
 - A link works for one person only; a resend revokes the older link. After the PIN is chosen the link needs that
   person's PIN to show the checklist again. Nothing is uploaded to Payroll Relief.
-- Call-outs (handbook section 3): text the manager 4+ hours ahead, then "I need coverage" on the shift in the team app
+- Call-outs (handbook section 2): text the manager 4+ hours ahead, then "I need coverage" on the shift in the team app
   (`src/lib/shift-coverage.ts`, migration 0045): a post in the team group chat as the employee (with the app notification),
   never the reason; a coworker taps "I'll take it" (first wins) and a manager approves on Schedule → Requests, which
   moves the shift. Late (<4 h) and sick-leave flags show only to managers. Handbook page has "Send to N who haven't
@@ -529,13 +529,13 @@ flowchart LR
   $10.70 cash wage, $5.30 tip credit; add each new year's row). Add employee and the Pay tab refuse a driver rate under
   the cash wage; the pay notice is LS55 with both rates and the tip credit. Payroll shows "Driver pay below minimum
   wage" when a driver's tipped rate × driving hours + delivery tips is under the minimum for those hours.
-  The 2-hour/20% non-tipped-work rule is handled by paying non-delivery time at the regular rate (handbook section 7).
+  The 2-hour/20% non-tipped-work rule is handled by paying non-delivery time at the regular rate (handbook section 9).
 - Second overtime rule (2026-11-07, `src/lib/payroll-overtime-rules.ts`): hours past 40 are taken in the order worked
   and belong to the role at that moment (driver shifts are tipped after 3 PM, as for TipWa). In-store overtime is
   1.5 × regular; driving overtime is driver rate + ½ minimum while a tip credit is taken (2026: $10.70 → $18.70).
   Payroll shows "Overtime by role" with pay per role; the LS55 pay notice lists both overtime rates.
   By-role pricing needs the employee's signed agreement (29 CFR 778.419): it is on the two-rate pay notice
-  (`employment_forms.overtime_by_role_agreement`, migration 0046) and in handbook section 7. Without a signed one,
+  (`employment_forms.overtime_by_role_agreement`, migration 0046) and in handbook section 9. Without a signed one,
   Payroll shows the weighted-average overtime (29 CFR 778.115) to pay instead.
   Paperwork → "Send overtime agreement to drivers" issues every active employee with a driver rate who hasn't signed
   it an updated pay notice (same rates + agreement, `noticeKind: overtime-agreement`) and a Hub message to sign it.
@@ -543,8 +543,24 @@ flowchart LR
   once Chris adds that earnings code; in-store overtime stays in `OT`. Without the column all overtime goes in
   `OT` with a note on the plan. Scheduler: anyone over 40 shows which shifts the overtime lands on and suggests
   putting driving last in the week (`src/lib/schedule-overtime-hint.ts`); it never blocks.
-- Handbook sections 3 (call-outs), 5 (breaks), 13 (alcohol, zero tolerance) and 14 (no smoking/vaping) are marked draft until Chris approves
-  the wording; any handbook change asks every employee to sign again.
+- Handbook `2026-11-08-draft` (`src/lib/corner-deli-handbook.ts`) follows the workday: attendance and coverage,
+  order taking and corrections, kitchen/delivery work, cleaning and closing, inventory, meals and purchasing,
+  then conduct and accountability. Sections 2 (call-outs), 18 (alcohol) and 19 (smoking), plus driver pay wording
+  in section 9, retain their existing owner-review status. Version/content changes require a new acknowledgment;
+  the send-to-unsigned action stays disabled while the version is a draft.
+- Owner's November 8 operating policies are handbook content, not newly implemented POS enforcement: confused
+  orders require full readback and reconfirmation after any change; every mistake is reported, investigated against
+  the order and corrected with a reprinted correction slip. Daily cleaning/checklists, two closers scheduled for
+  30 minutes after closing, conditional late-delivery coordination, ounce/unit inventory and waste records, and
+  the $30 daily company-card limit with receipts are covered. Off-duty unpaid meals are distinct from paid short
+  rest breaks; building coverage is provided by an on-duty, clocked-in coworker.
+- The old six-hour free-meal entitlement and meal-mistake allowance are replaced by the suspension pending the
+  new system and owner-launched menu. Off-menu discounts vary; custom employee items go to the owner for costing.
+  The handbook records the requested future drink price rounded to the NEAREST $0.25. The current dev pricing
+  implementation below rounds UP, so that difference needs resolving before the program launches. This handbook
+  revision does not change pricing, scheduling, card controls, or send messages to employees.
+- Break wording references: [New York meal/rest FAQ](https://dol.ny.gov/meal-and-rest-periods-faq) and
+  [US DOL hours worked](https://www.dol.gov/agencies/whd/fact-sheets/22-flsa-hours-worked).
 
 ## 8c. Delivery car tablet (Corner Deli, dev)
 

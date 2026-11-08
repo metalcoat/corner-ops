@@ -113,10 +113,12 @@ test("the handbook carries the zero-tolerance alcohol and no-smoking policies", 
   assert.match(callOuts, /No-call\/no-show .* immediate termination, except in an extreme outside emergency/);
   assert.match(callOuts, /don't have to find your own coverage to use sick leave/);
   assert.match(callOuts, /3 or more work days in a row/);
-  const breaks = text(/Breaks and meal/);
-  assert.match(breaks, /unpaid, so please clock out/);
-  assert.match(breaks, /at least 30 minutes/);
-  assert.match(breaks, /check with your manager first/);
+  const breaks = text(/Breaks.*meal/);
+  assert.match(breaks, /Clock out for an unpaid meal period only when you are fully relieved of all work duties/);
+  assert.match(breaks, /Short rest breaks of 20 minutes or less are paid time/);
+  assert.match(breaks, /meal periods required by New York law/);
+  assert.match(breaks, /Arrange breaks with the manager/);
+  assert.match(breaks, /on-duty employee must remain INSIDE the building/);
   const numbers = CORNER_DELI_HANDBOOK_SECTIONS.map((section) => Number(section.title.split(".")[0]));
   assert.deepEqual(numbers, numbers.map((_, index) => index + 1));
 });

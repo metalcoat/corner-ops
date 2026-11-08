@@ -4,10 +4,10 @@ export type HandbookSection = {
   bullets?: string[];
 };
 
-// Sections 3 (call-outs), 5 (breaks), 13 and 14 (alcohol, smoking) are drafts awaiting Chris's review of the wording. When approved,
+// Sections 2 (call-outs), 18 and 19 (alcohol, smoking), and the driver pay wording in section 9 remain drafts awaiting Chris's review. When approved,
 // drop "-draft" and the "(draft: owner review)" title notes. Any change to this file asks every employee to sign again.
-export const CORNER_DELI_HANDBOOK_VERSION = "2026-11-06-draft";
-export const CORNER_DELI_HANDBOOK_EFFECTIVE_DATE = "November 6, 2026";
+export const CORNER_DELI_HANDBOOK_VERSION = "2026-11-08-draft";
+export const CORNER_DELI_HANDBOOK_EFFECTIVE_DATE = "November 8, 2026";
 
 export const CORNER_DELI_HANDBOOK_TITLE = "Corner Deli Employee Handbook";
 
@@ -18,27 +18,19 @@ export const CORNER_DELI_HANDBOOK_INTRO = [
 
 export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
   {
-    title: "1. Customer service: the customer is always right (even when they are not)",
-    bullets: [
-      "Do not argue with a customer. Stay calm, clarify the problem, and make a reasonable effort to resolve it before transferring the customer to a manager.",
-      "If a customer becomes threatening, discriminatory, harassing, or unsafe, employees are not required to accept the conduct. Step away and involve the manager on duty immediately.",
-      "Be polite when asking a customer to repeat information you did not hear. A correct order is faster than remaking a wrong one.",
-      "Answer phones promptly and professionally. Use caller ID when available and verify delivery addresses and callback numbers before completing a delivery order.",
-    ],
-  },
-  {
-    title: "2. Attendance, scheduling, pace, and communication",
+    title: "1. Attendance, scheduling, and daily responsibility",
     bullets: [
       "Report to work on time and ready to begin working at the scheduled start time.",
       "Employees are expected to work at a safe, efficient pace, move with purpose, multitask when appropriate, answer phones, and help coworkers rather than waiting for a task to be assigned when work is obviously available.",
-      "Schedule conflicts, lateness, transportation problems, and other foreseeable issues must be communicated to management as early as possible. Problems that are not communicated in advance place the burden on the rest of the team and may result in discipline. Call-outs follow section 3.",
+      "Management is here to explain the work and answer questions. Once you understand a task, you are responsible for doing it without daily reminders. Wiping tables, cleaning bathrooms, and keeping up with daily work are part of the job; do not leave obvious work for someone else.",
+      "Schedule conflicts, lateness, transportation problems, and other foreseeable issues must be communicated to management as early as possible. Problems that are not communicated in advance place the burden on the rest of the team and may result in discipline. Call-outs follow section 2.",
       "Repeated lateness may result in discipline up to and including termination.",
       "During training, employees may be scheduled across different days and time periods so they can learn the operation. After training, management will generally try to maintain consistent schedules when business needs allow.",
       "Do not work off the clock, clock in or out for another employee, or ask another employee to do so. Report missed or incorrect punches promptly.",
     ],
   },
   {
-    title: "3. Call-outs and finding coverage (draft: owner review)",
+    title: "2. Call-outs and finding coverage (draft: owner review)",
     paragraphs: [
       "We run with a small crew, so one missing person affects everyone working that day. Last-minute call-outs must be rare.",
     ],
@@ -53,28 +45,31 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     ],
   },
   {
-    title: "4. Employee meal benefit",
-    paragraphs: [
-      "The employee meal is a company benefit and is separate from any meal period required by law.",
-    ],
+    title: "3. Appearance, hygiene, and readiness for work",
     bullets: [
-      "One meal from the approved employee menu is provided for each working day when the employee works a shift of at least 6 hours.",
-      "Employee meals are portioned exactly the same way as a customer's meal.",
-      "A food mistake may be taken as the employee's meal only when the item is on the employee menu and a manager approves it. If the employee has already taken a meal for the day, the manager on duty decides what happens to the mistake.",
-      "All employee meals are prepared by the cooks. Delivery drivers may not prepare their own employee meals.",
-      "Employees must ask permission before an employee meal is made or taken.",
-      "The free meal may be obtained before the shift, during a clocked-out meal period, or after the shift. It may not be eaten while the employee is supposed to be working.",
-      "Drinks are not included in the employee meal benefit unless management specifically authorizes otherwise.",
+      "Arrive in clean, work-appropriate clothing and footwear suitable for the assigned job and restaurant safety requirements.",
+      "Follow required hair-restraint, handwashing, glove, jewelry, and personal-hygiene rules for food service.",
+      "Bring required work items and be ready to begin at the scheduled start time rather than using the first part of the shift to get personally organized.",
     ],
   },
   {
-    title: "5. Breaks and meal periods (draft: owner review)",
+    title: "4. Breaks, meal periods, and building coverage",
     bullets: [
-      "Your meal break is unpaid, so please clock out when it starts and clock back in when it ends. Meal breaks are the same as any other break: unpaid, and you clock out.",
-      "New York requires a meal break of at least 30 minutes on longer shifts (generally a shift of more than 6 hours that runs through 11 AM to 2 PM, and other times the law sets). Your manager schedules it, and the timing may move during a rush.",
-      "Other breaks aren't usually part of a shift, so check with your manager first if you need one. If a manager okays a short break of under 20 minutes, stay clocked in: the law requires short breaks to be paid.",
-      "Before you leave the work area for a break, give the manager and nearby coworkers a heads-up so the work is covered.",
-      "While you're clocked out for a meal break you are fully off duty and free to leave. If you're asked to work or get interrupted, clock back in or tell your manager so that time is paid.",
+      "Arrange breaks with the manager and tell your teammate before stepping away. Confirm who is covering the work; do not assume someone else knows you are leaving.",
+      "At least one on-duty employee must remain INSIDE the building during breaks. The employee covering customers, phones, or the building stays on the clock. If coverage is not available, contact the manager to arrange it.",
+      "Clock out for an unpaid meal period only when you are fully relieved of all work duties, and clock back in when it ends. You are free to leave during an unpaid meal period; another on-duty employee provides building coverage.",
+      "Short rest breaks of 20 minutes or less are paid time. Stay clocked in for those breaks. Any other break that must be paid under applicable law remains paid.",
+      "Management must schedule the meal periods required by New York law for the length and timing of your shift. A rush or a coverage problem does not cancel a required meal period.",
+      "If a meal period is interrupted by work, clock back in and tell the manager so the time record and any affected meal period are corrected. Never answer phones, clean, or provide coverage off the clock.",
+    ],
+  },
+  {
+    title: "5. Customer service: the customer is always right (even when they are not)",
+    bullets: [
+      "Do not argue with a customer. Stay calm, clarify the problem, and make a reasonable effort to resolve it before transferring the customer to a manager.",
+      "If a customer becomes threatening, discriminatory, harassing, or unsafe, employees are not required to accept the conduct. Step away and involve the manager on duty immediately.",
+      "Be polite when asking a customer to repeat information you did not hear. A correct order is faster than remaking a wrong one.",
+      "Answer phones promptly and professionally. Use caller ID when available and verify delivery addresses and callback numbers before completing a delivery order.",
     ],
   },
   {
@@ -85,11 +80,37 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
       "For example, do not list salsa, jalapenos, buffalo sauce, and every other optional modifier for a chicken quesadilla unless the customer asks to customize it.",
       "For subs and similar items, follow the established script instead of listing every condiment and topping in the system.",
       "Use caller ID information as a tool, but still confirm information that matters to the order. Delivery addresses must be verified before the order is sent to the kitchen or driver.",
-      "Read back or confirm details when an order is unusual, unclear, expensive, or likely to create a costly mistake.",
+      "For an unusual, expensive, or potentially costly order, or if there is any confusion about what the customer wants or what we entered, read the ENTIRE order back at the end of the call and get the customer's confirmation before moving forward. Include quantities, sizes, changes, and pickup or delivery details.",
+      "If the customer changes even one thing during confirmation, update the order, reread the whole order, and get confirmation again. Repeat until the customer confirms the complete order as entered. Do not guess or rely on an earlier confirmation.",
+      "A few extra seconds confirming an order is better than spending 10 to 30 minutes or more fixing a mistake. Politely ask again whenever something is unclear.",
     ],
   },
   {
-    title: "7. Delivery drivers",
+    title: "7. Order mistakes, owner notification, and corrected slips",
+    paragraphs: [
+      "The owner must be told about every order mistake promptly. Reporting will also be required in the new system; the reporting expectation applies now.",
+    ],
+    bullets: [
+      "Open the original order and compare what the customer confirmed, what was entered, and what was made. Establish whether the order was taken incorrectly or prepared incorrectly. If the cause is unclear, record that and ask for help rather than guessing.",
+      "Make the necessary correction and REPRINT THE CORRECTION. The printed slip must clearly show the correct items and instructions. A verbal explanation by itself is not enough.",
+      "Give the corrected slip to the person making the food and clearly identify what needs to be remade. Mark the affected original slip as superseded so the same items are not made twice by mistake; keep the correction linked to the original order.",
+      "Record the order number, what went wrong, the correction, any food wasted or remade, and who was notified. Use the record designated by management; until a shared record is available, send these details to the owner with the mistake report.",
+      "Refunds, discounts, voids, and other adjustments still require the appropriate authorization. Reporting or correcting a mistake is not permission to give away food or change a charge on your own.",
+    ],
+  },
+  {
+    title: "8. Cooks and kitchen production",
+    bullets: [
+      "Read the entire order slip. Follow the manager's direction about how orders should be grouped and timed.",
+      "Use fryer capacity efficiently. Multiple orders of the same product may be cooked in the same basket when doing so improves speed without sacrificing food quality, portion accuracy, allergen controls, or correct order assembly.",
+      "Portioning standards exist for a reason. Follow the established portions, recipes, and build standards consistently for customers and employees.",
+      "Keep the line moving while maintaining safe food handling. Speed does not excuse serving an unsafe or obviously incorrect product.",
+      "Unauthorized personal cell-phone use while actively working, especially in food-preparation and service areas, is prohibited and may result in discipline up to and including termination.",
+      "Non-emergency personal calls should be handled during an approved break and away from the active work area.",
+    ],
+  },
+  {
+    title: "9. Delivery drivers",
     bullets: [
       "Pay for driving (draft: owner review): driving hours are paid at the driver (tipped) rate shown on your New York pay notice, plus your delivery tips. Corner Deli takes the New York food service tip credit for those hours. If your driver wage plus delivery tips for a week come to less than the full minimum wage for your driving hours, Corner Deli pays the difference.",
       "Overtime (draft: owner review): hours over 40 in a week are counted in the order you work them. Each overtime hour is paid at 1.5 times the rate for the job you're doing at that time: in-store at 1.5 times your regular rate, driving at the driving overtime rate on your pay notice ($18.70 in 2026 for a $10.70 driver rate). You agree to this when you sign your pay notice.",
@@ -106,18 +127,7 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     ],
   },
   {
-    title: "8. Cooks and kitchen production",
-    bullets: [
-      "Read the entire order slip. Follow the manager's direction about how orders should be grouped and timed.",
-      "Use fryer capacity efficiently. Multiple orders of the same product may be cooked in the same basket when doing so improves speed without sacrificing food quality, portion accuracy, allergen controls, or correct order assembly.",
-      "Portioning standards exist for a reason. Follow the established portions, recipes, and build standards consistently for customers and employees.",
-      "Keep the line moving while maintaining safe food handling. Speed does not excuse serving an unsafe or obviously incorrect product.",
-      "Unauthorized personal cell-phone use while actively working, especially in food-preparation and service areas, is prohibited and may result in discipline up to and including termination.",
-      "Non-emergency personal calls should be handled during an approved break and away from the active work area.",
-    ],
-  },
-  {
-    title: "9. Food safety, sanitation, and illness reporting",
+    title: "10. Food safety, sanitation, and illness reporting",
     bullets: [
       "Follow all required handwashing, glove, utensil, temperature, storage, labeling, date-marking, and cross-contamination procedures.",
       "Clean as you go. Keep prep surfaces, equipment, floors, coolers, freezers, sinks, bathrooms, dining areas, and workstations in sanitary condition throughout the shift, not merely at closing.",
@@ -127,7 +137,55 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     ],
   },
   {
-    title: "10. Cash, discounts, comps, voids, tips, and honesty",
+    title: "11. Daily cleaning, closing, and late deliveries",
+    bullets: [
+      "Clean throughout the shift and complete the daily cleaning work without constant reminders. Wipe tables as needed, check the bathrooms during the day, and clean the toilets and bathrooms every day. A toilet must not go a week without cleaning.",
+      "Management will provide a daily cleaning checklist with a named person responsible for each task. Until it is posted, agree with the manager and your teammate on who is doing each task. Mark a task complete only after doing it, and report anything unfinished or any supplies or equipment needed.",
+      "Two employees will be scheduled until 30 minutes after closing every night. Follow the posted schedule, divide the closing work, and check together that the required tasks are complete.",
+      "For a delivery received in the last 30 minutes before closing, finish the necessary cleaning before sending the delivery out whenever possible. Coordinate with your teammate so the building remains covered.",
+      "Do not hold a delivery for cleaning if doing so would compromise food safety or quality or miss the delivery time quoted to the customer. Tell the manager when cleaning and delivery commitments conflict, and update the customer if the promised time changes.",
+      "Closing work includes the front floor, tables, grill, bathrooms, emptying all trash cans in the front, bathrooms, and kitchens, and emptying the designated grease traps or grease collection containers using the trained procedure. Ask which equipment and procedure apply if unsure; never handle hot grease or unfamiliar equipment without training.",
+      "The closing checklist is not permission to work off the clock. If work will run beyond the scheduled 30 minutes, tell the manager and record all time actually worked.",
+    ],
+  },
+  {
+    title: "12. Inventory, portions, spills, and waste",
+    paragraphs: [
+      "Management is already tracking inventory shortages and will track product use more closely, down to the ounce for ingredients measured by weight. All product used, discarded, spilled, wasted, or taken as an authorized employee meal must be accounted for.",
+    ],
+    bullets: [
+      "Follow the standard recipe and portion for every item. Use the appropriate scale or measuring tool instead of free-pouring or guessing. Record packaged products by unit and ingredients in the specified measurement unit.",
+      "Promptly record spills, discarded food, spoilage, preparation mistakes, remakes, and other waste. Include the item, quantity and unit, reason, date and time, employee, and related order number when there is one.",
+      "Address an immediate safety or sanitation problem first, then document the loss. If the quantity cannot be measured, identify it as an estimate and tell the manager rather than making up an exact amount.",
+      "Report inventory discrepancies to the owner. A shortage needs investigation; do not assume its cause or hide it by changing a count.",
+      "When employee meals resume, every authorized meal and its ingredients must be recorded through the employee-menu process. Mistakes and waste do not become unrecorded free employee food.",
+    ],
+  },
+  {
+    title: "13. Employee meals, discounts, custom items, and drinks",
+    paragraphs: [
+      "Employee meals are suspended until the new POS system and separate employee menu are launched by the owner. This replaces the previous free-meal benefit, including the six-hour eligibility rule. The meal benefit is separate from any meal period required by law.",
+    ],
+    bullets: [
+      "When the new program launches, use the separate employee menu and its approved items, portions, and prices. Some items outside that menu will have an employee discount and some will have no discount. Only the owner-approved pricing applies; do not create your own discount.",
+      "If you currently make a custom item that you want included on the new employee menu, tell the owner. The owner will decide how to account for the ingredients, portions, and price before it is added.",
+      "Once the employee meal program launches, authorized employee meals must be prepared by the cooks, follow the approved portions, and be recorded. Delivery drivers may not prepare their own employee meals. Ask permission before any employee meal is prepared or taken.",
+      "Eat during an approved break or other off-duty time, not while performing active work. The paid or unpaid status of a break follows section 4.",
+      "Do not take an order mistake, leftover, or waste item as a free employee meal. Report it and follow the owner's direction; the former meal-mistake allowance does not continue during the suspension.",
+      "Complimentary store drinks were discontinued and remain excluded from the employee benefit.",
+      "The planned drink program at launch is cost plus tax and deposit, rounded to the nearest $0.25. Around $1.50 is an estimate, not a fixed price for every drink. The owner will confirm the eligible drinks and prices when the program opens.",
+    ],
+  },
+  {
+    title: "14. Company card purchases and receipts",
+    bullets: [
+      "Company card purchases are limited to $30 per day. This is a daily limit, not a separate allowance for each employee or each purchase.",
+      "Message or call the owner as soon as possible about any purchase outside normal business purchases. Contact the owner if a needed purchase would exceed the daily limit.",
+      "Check the day's spending with the manager or the shared daily spending record before using the card. Keep the itemized receipt and record the date, amount, business purpose, and person making the purchase. Until management provides a shared record, send those details and the receipt to the owner so the team can check the daily total.",
+    ],
+  },
+  {
+    title: "15. Cash, discounts, comps, voids, tips, and honesty",
     bullets: [
       "Handle company money and customer payments accurately. Do not borrow from drawers, bags, deposits, or company funds.",
       "Do not create unauthorized discounts, free food, comps, voids, refunds, or other adjustments for yourself, friends, family, coworkers, or customers.",
@@ -137,7 +195,7 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     ],
   },
   {
-    title: "11. Workplace respect and conduct",
+    title: "16. Workplace respect and conduct",
     bullets: [
       "Treat coworkers, customers, vendors, and managers with basic respect. Fighting, threats, intimidation, bullying, or deliberate disruption of the workplace are prohibited.",
       "Discrimination, unlawful harassment, and retaliation are prohibited. Employees should report concerns promptly to a manager or the owner and may bypass any person who is involved in the concern.",
@@ -146,7 +204,7 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     ],
   },
   {
-    title: "12. Safety and emergencies",
+    title: "17. Safety and emergencies",
     bullets: [
       "Use knives, slicers, fryers, ovens, hot surfaces, cleaning chemicals, ladders, and other equipment only as trained and with required guards and protective equipment in place.",
       "Do not bypass safety devices or take shortcuts that create an unreasonable risk of injury.",
@@ -156,7 +214,7 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     ],
   },
   {
-    title: "13. Alcohol and drugs: zero tolerance (draft: owner review)",
+    title: "18. Alcohol and drugs: zero tolerance (draft: owner review)",
     paragraphs: [
       "Corner Deli has zero tolerance for alcohol at work. There are no warnings and no second chances under this policy.",
     ],
@@ -170,7 +228,7 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     ],
   },
   {
-    title: "14. No smoking or vaping (draft: owner review)",
+    title: "19. No smoking or vaping (draft: owner review)",
     bullets: [
       "No smoking or vaping of any kind (cigarettes, cigars, e-cigarettes and vapes, or cannabis) inside the building, out front of the store, or in the company vehicle. This applies at all times: on shift, on breaks and off the clock.",
       "\"Out front\" means the front entrance, the sidewalk and the front parking area: anywhere customers see or walk through.",
@@ -179,15 +237,7 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     ],
   },
   {
-    title: "15. Appearance, hygiene, and readiness for work",
-    bullets: [
-      "Arrive in clean, work-appropriate clothing and footwear suitable for the assigned job and restaurant safety requirements.",
-      "Follow required hair-restraint, handwashing, glove, jewelry, and personal-hygiene rules for food service.",
-      "Bring required work items and be ready to begin at the scheduled start time rather than using the first part of the shift to get personally organized.",
-    ],
-  },
-  {
-    title: "16. Phones, recordings, confidential information, and social media",
+    title: "20. Phones, recordings, confidential information, and social media",
     bullets: [
       "Personal phones should remain put away while actively working unless a manager authorizes a business or emergency use.",
       "Do not disclose customer addresses, phone numbers, payment information, employee private information, passwords, security information, or other confidential business records without authorization.",
@@ -196,7 +246,7 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     ],
   },
   {
-    title: "17. Discipline, repeated violations, and employment status",
+    title: "21. Discipline, repeated violations, and employment status",
     paragraphs: [
       "Corner Deli tries to handle ordinary problems reasonably, but repeated violations, serious misconduct, safety violations, dishonesty, attendance failures, or refusal to follow lawful work instructions may result in discipline up to and including termination. Depending on the seriousness of the conduct, management may skip intermediate steps.",
       "Unless a written agreement signed by the owner states otherwise, employment is at will to the extent permitted by New York law. This handbook is not a contract guaranteeing employment for any specific period and does not waive any right provided by law.",
