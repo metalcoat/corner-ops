@@ -95,7 +95,7 @@ async function main() {
     "Maximum",
     "Would you like peppers, mushrooms, or onions on that?",
     "hamburgerSteakToppingsDecision",
-    "What's the first and last name for the order?",
+    "What's the name on it?",
     "Never ask whether their name is “Customer,”",
   ]) {
     assert.ok(prompt.includes(phrase), `Missing prompt policy: ${phrase}`);

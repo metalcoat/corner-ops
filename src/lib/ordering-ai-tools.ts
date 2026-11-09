@@ -768,6 +768,10 @@ export const modifierAliases = (name: string, groupName = "") => {
     aliases.push(value.replace(/\bsauce\b/gi, ""));
     if (/^mayo$/i.test(value)) aliases.push("mayonnaise");
     if (/^extra cheese$/i.test(value)) aliases.push("cheese");
+    // How callers say these (2,232 store calls, Chris 2026-11-09: Dark Cooked is well done).
+    if (/^dark cooked$/i.test(value)) aliases.push("well done", "extra done", "well cooked", "cooked well", "dark");
+    if (/^extra crispy$/i.test(value)) aliases.push("crispy", "extra crisp");
+    if (/^xtra garlic bread$/i.test(value)) aliases.push("garlic bread", "extra garlic bread");
   }
   const group = spokenKey(groupName),
     simple = normalizedSpokenName(name),
@@ -1309,6 +1313,12 @@ export async function priceSpokenOrder(input: {
       const sandwichless = requested.name.replace(/\s+(?:sandwich|sammich|hoagie|hero)$/i, "").trim();
       if (sandwichless !== requested.name.trim() && !allItems.some((row) => spokenKey(normalizedSpokenName(row.name)) === spokenKey(requested.name)) && allItems.some((row) => spokenKey(normalizedSpokenName(row.name)) === spokenKey(sandwichless)))
         requested = { ...requested, name: sandwichless };
+      // "Whole steak", "half turkey": the sub size said before its name (2,232 store calls, 2026-11-09).
+      const subSize = /^(whole|full|half|1\/2)\s+(?:an?\s+)?(.+?)$/i.exec(requested.name.trim());
+      if (subSize && !allItems.some((row) => spokenKey(normalizedSpokenName(row.name)) === spokenKey(requested.name))) {
+        const base = [subSize[2], subSize[2].replace(/\s+sub$/i, "")].find((candidate) => allItems.some((row) => spokenKey(normalizedSpokenName(row.name)) === spokenKey(candidate)));
+        if (base) requested = { ...requested, name: base, variant: requested.variant || (/^(?:half|1\/2)$/i.test(subSize[1]) ? "1/2 Sub" : "Full Sub") };
+      }
       // "Cheeseburger deluxe": the burger with mayo, lettuce, tomato, onion and pickles (owner, 2026-10-25).
       // Lettuce, tomato and onion are the Deluxe group, $0.25 once for any or all (Chris 2026-11-06).
       // "Deluxe" sent as a burger modifier means the same as "cheeseburger deluxe".

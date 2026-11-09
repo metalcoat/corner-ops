@@ -636,7 +636,7 @@ async function callTool(rpc: Rpc) {
             text: JSON.stringify({
               error: {
                 code: "FOLLOW_UP_REQUIRED",
-                message: "What's the first and last name for the order?",
+                message: "What's the name on it? First and last, please.",
                 retryable: true,
               },
             }),

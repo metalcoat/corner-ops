@@ -1,5 +1,6 @@
 // Regressions from Chris's dev test call 2026-11-07 18:34 (620d00ee): "two jumbo pizzas" went in plain with no
 // toppings question, and "cheesy bread" found Cheesy Breadsticks but the caller only heard "we don't have that".
+// ("Cheesy bread" itself is an alias since 2026-11-09, so the close match is tested with "Cheesy Breadstix".)
 // Run: npx tsx scripts/ai-cart-regressions/pizza-toppings.ts
 import assert from "node:assert/strict";
 import { loadHarness } from "./harness";
@@ -36,7 +37,7 @@ async function main() {
     });
     await h.check("a close menu match is offered, not refused", async () => {
       const m = await h.newMcpCall();
-      const r = await m.invoke({ operation: "add", items: [{ name: "Cheesy Bread", quantity: 1 }], customerText: "cheesy bread" });
+      const r = await m.invoke({ operation: "add", items: [{ name: "Cheesy Breadstix", quantity: 1 }], customerText: "cheesy breadstix" });
       assert.ok(r.isError, JSON.stringify(r.body));
       assert.equal(r.body.error?.message, "We have Cheesy Breadsticks, would you like those?", JSON.stringify(r.body));
       assert.ok(!r.orderId || !(await h.dbLines(r.orderId)).some((line: any) => /breadstick/i.test(line.name)));
