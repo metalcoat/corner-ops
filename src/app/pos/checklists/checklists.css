@@ -90,3 +90,5 @@ html:has(.checklistScreen),body:has(.checklistScreen){background:#0d1310}
 .ckCountGrid tbody th{text-align:left;font-size:1.15em;padding-right:6px;white-space:nowrap}
 .ckCountGrid input{width:100%;min-height:64px;padding:6px 12px;border-radius:12px;border:2px solid #4b5f51;background:#0f1611;color:#fff;font:inherit;font-size:1.7em;font-weight:900;font-variant-numeric:tabular-nums}
 .ckCountGrid input::placeholder{color:#4b5f51}
+.checklistScreen .ckCounts input{background:#0f1611;border:2px solid #4b5f51;color:#fff;box-shadow:none;outline:none}
+.checklistScreen .ckCounts input:focus{border-color:#8fd0a2;box-shadow:0 0 0 3px #8fd0a244}

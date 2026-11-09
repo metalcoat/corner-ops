@@ -249,6 +249,9 @@ test("checklists: pizza dough is counted as a grid by size", () => {
   assert.equal(counts["Small · Made today"], 0);
   assert.equal(formatCounts(counts), "Small 4 · Regular 10 (+6 made) · Jumbo 2 · Thick 0");
   assert.equal(formatCounts({ "On hand": 12, "Made today": 40 }), "On hand 12 · Made today 40");
+  // jsonb hands keys back shortest first; the line still reads in size order.
+  assert.equal(formatCounts({ "Jumbo · On hand": 2, "Small · On hand": 4, "Thick · On hand": 1, "Regular · On hand": 10, "Regular · Made today": 6 }), "Small 4 · Regular 10 (+6 made) · Jumbo 2 · Thick 0".replace("Thick 0", "Thick 1"));
+  assert.equal(formatCounts({ "Made today": 40, "On hand": 12 }), "On hand 12 · Made today 40");
   assert.throws(() => parseCounts(DOUGH, { "Small · On hand": "4" }), /Regular · On hand/);
 });
 

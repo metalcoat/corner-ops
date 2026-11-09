@@ -276,6 +276,8 @@ export function parseGoodForDays(value: unknown): number | null {
   return days;
 }
 
+const SIZE_ORDER = ["small", "medium", "regular", "large", "jumbo", "thick"];
+
 /** Saved numbers in a line: "On hand 12 · Made today 40", or for a grid "Small 5 · Regular 8 (+2 made) · …". */
 export function formatCounts(counts: Record<string, number> | null | undefined): string {
   if (!counts) return "";
@@ -288,7 +290,10 @@ export function formatCounts(counts: Record<string, number> | null | undefined):
     if (isMade(field)) entry.made += value;
     else entry.onHand = value;
   }
-  for (const [size, entry] of sizes) parts.push(`${size} ${entry.onHand ?? "—"}${entry.made ? ` (+${entry.made} made)` : ""}`);
+  // Saved numbers come back from the database in its own key order: put them back in a reading order.
+  parts.sort((a, b) => Number(/^made\b/i.test(a)) - Number(/^made\b/i.test(b)));
+  const rank = (size: string) => { const at = SIZE_ORDER.indexOf(size.toLowerCase()); return at < 0 ? SIZE_ORDER.length : at; };
+  for (const [size, entry] of [...sizes].sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b))) parts.push(`${size} ${entry.onHand ?? "—"}${entry.made ? ` (+${entry.made} made)` : ""}`);
   return parts.join(" · ");
 }
 
