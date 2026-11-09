@@ -108,3 +108,10 @@ test("checklists: migration seeds placeholders once and adds the screen kind", (
   assert.match(migration, /\('Closing', 'Mop up front', 10\)/);
   assert.match(migration, /\('Potato salad', 20, false\)/);
 });
+
+test("checklists: 0050 sets the store's real deli salad list in order", () => {
+  const migration = readFileSync("db/migrations/0050_deli_salad_list.sql", "utf8");
+  assert.match(migration, /\('Macaroni', 10\), \('Potato', 20\), \('Pasta', 30\), \('Green Bean', 40\), \('Brown Bean', 50\), \('Cole Slaw', 60\), \('Antipasto', 70\)/);
+  // Tuna and Chicken salad are deleted only when no batch points at them (batches cascade on delete).
+  assert.match(migration, /DELETE FROM deli_salads[\s\S]*NOT EXISTS \(SELECT 1 FROM deli_salad_batches/);
+});
