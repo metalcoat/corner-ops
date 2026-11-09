@@ -44,7 +44,7 @@ export async function POST(request: Request) {
   try {
     const worker = await confirmWorker(pass);
     let batch = null;
-    if (body.action === "check") await checkItems(Array.isArray(body.itemIds) ? body.itemIds.map(String) : [], worker, body.bulk === true);
+    if (body.action === "check") await checkItems(Array.isArray(body.itemIds) ? body.itemIds.map(String) : [], worker, body.bulk === true, body.counts);
     else if (body.action === "uncheck") await uncheckItem(String(body.itemId || ""), worker, body.reason);
     else if (body.action === "salad") batch = await logSaladBatch(String(body.saladId || ""), worker, { batchSize: body.batchSize, notes: body.notes });
     else if (body.action === "batch") batch = await updateSaladBatch(Number(body.id), { batchSize: body.batchSize, notes: body.notes });

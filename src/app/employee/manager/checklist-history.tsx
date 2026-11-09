@@ -5,13 +5,15 @@ import { useEffect, useMemo, useState } from "react";
 import type { ManagerReportView } from "@/lib/ordering-manager-report";
 import StoreChecklistSetup from "@/components/store-checklist-setup";
 
-type Check = { employeeName: string; checkedAt: string; bulk: boolean; undoneAt: string | null; undoneByName: string | null; undoReason: string | null };
+type Check = { employeeName: string; checkedAt: string; bulk: boolean; counts?: Record<string, number> | null; undoneAt: string | null; undoneByName: string | null; undoReason: string | null };
 type ListDay = { checklistId: string; name: string; done: number; total: number; missed: string[]; items: Array<{ itemId: string; label: string; check: Check | null; undone: Check[] }> };
 type Batch = { id: number; businessDate: string; saladName: string; employeeName: string; madeAt: string; batchSize: string; notes: string; voidedAt: string | null; voidedByName: string | null; voidReason: string | null };
-type Day = { businessDate: string; finished: boolean; lists: ListDay[]; batches: Batch[] };
+type CountRow = { key: string; label: string; cells: Array<{ list: string; onHand: number | null; by: string | null }>; made: number };
+type Day = { businessDate: string; finished: boolean; lists: ListDay[]; batches: Batch[]; counts: CountRow[] };
 type History = { today: string; days: Day[]; people: Array<{ name: string; checks: number; undone: number; batches: number }> };
 
 const time = (iso: string) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" }).format(new Date(iso));
+const countText = (counts?: Record<string, number> | null) => (counts ? Object.entries(counts).map(([field, value]) => `${field} ${value}`).join(" · ") : "");
 const dayLabel = (date: string) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" }).format(new Date(`${date}T12:00:00Z`));
 
 function Section({ title, count, children }: { title: string; count?: number; children: React.ReactNode }) {
@@ -44,6 +46,9 @@ export default function ChecklistHistory({ view, date, onOpenDay }: { view: Mana
   const people = [...new Set(batches.map((batch) => batch.employeeName))].sort();
   const shownBatches = batches.filter((batch) => (!salad || batch.saladName === salad) && (!person || batch.employeeName === person));
   const single = view === "day" ? history.days[0] : null;
+  // Each counted thing (sub rolls, buns, dough) with the lists it is counted on, in list order.
+  const countKeys = [...new Map(history.days.flatMap((day) => day.counts).map((row) => [row.key, row])).values()]
+    .map((row) => ({ key: row.key, label: row.label, lists: [...new Set(history.days.flatMap((day) => day.counts.filter((entry) => entry.key === row.key).flatMap((entry) => entry.cells.map((cell) => cell.list))))] }));
 
   return <div className="ckHistory">
     <section className="mgrTiles" aria-label="Checklist summary">
@@ -64,7 +69,7 @@ export default function ChecklistHistory({ view, date, onOpenDay }: { view: Mana
       {list.items.map((item) => <div key={item.itemId} className={!item.check && single.finished ? "mgrRow flag" : "mgrRow"}>
         <div>
           <strong>{item.check ? "✓" : "✗"} {item.label}</strong>
-          {item.check && <small>{item.check.employeeName} · {time(item.check.checkedAt)}{item.check.bulk ? " · marked with the rest" : ""}</small>}
+          {item.check && <small>{item.check.employeeName} · {time(item.check.checkedAt)}{item.check.bulk ? " · marked with the rest" : ""}{item.check.counts ? ` · ${countText(item.check.counts)}` : ""}</small>}
           {item.undone.map((check, index) => <small key={index}>Un-checked by {check.undoneByName} at {time(check.undoneAt!)}: {check.undoReason} (was {check.employeeName} · {time(check.checkedAt)})</small>)}
         </div>
         {!item.check && <b className={single.finished ? "bad" : undefined}>{single.finished ? "Missed" : "Not yet"}</b>}
@@ -83,6 +88,26 @@ export default function ChecklistHistory({ view, date, onOpenDay }: { view: Mana
           </button>;
         })}
       </div>
+    </Section>}
+
+    {countKeys.length > 0 && <Section title="Counts: start, shift change, close">
+      <p className="mgrEmpty">On hand at each count, and everything entered as made that day.</p>
+      {countKeys.map(({ key, label, lists: columns }) => <div key={key} className="ckCountTable">
+        <h3>{label}</h3>
+        <table>
+          <thead><tr><th>Day</th>{columns.map((name) => <th key={name}>{name}</th>)}<th>Made</th></tr></thead>
+          <tbody>
+            {history.days.filter((day) => day.counts.some((row) => row.key === key)).map((day) => {
+              const row = day.counts.find((entry) => entry.key === key)!;
+              return <tr key={day.businessDate}>
+                <td>{dayLabel(day.businessDate)}</td>
+                {columns.map((name) => { const cell = row.cells.find((entry) => entry.list === name); return <td key={name} title={cell?.by ? `Counted by ${cell.by}` : undefined}>{cell?.onHand ?? "—"}</td>; })}
+                <td>{row.made}</td>
+              </tr>;
+            })}
+          </tbody>
+        </table>
+      </div>)}
     </Section>}
 
     <Section title="Deli salad batches" count={made.length}>

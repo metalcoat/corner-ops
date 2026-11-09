@@ -52,3 +52,20 @@ html:has(.checklistScreen),body:has(.checklistScreen){background:#0d1310}
 .ckSheet strong{font-size:1.35em}.ckSheet span{color:#bbf7d0}
 .ckSheet input{min-height:56px;padding:10px 12px;border-radius:12px;border:1px solid #3a4b3f;background:#0f1611;color:#fff;font:inherit}
 @media(max-width:640px){.checklistScreen{padding:12px 12px 120px}.ckBatches li{grid-template-columns:1fr}.ckBatches small{grid-column:1}}
+.ckItemWrap{display:grid;grid-template-columns:1fr auto;align-items:stretch;gap:0;border-radius:16px}
+.ckItemWrap .ckItem{min-width:0}
+.ckItemWrap:has(.ckHelp) .ckItem{border-top-right-radius:0;border-bottom-right-radius:0}
+.ckHelp{display:grid;align-content:stretch;gap:0;border:2px solid var(--ck-line);border-left:0;border-radius:0 16px 16px 0;overflow:hidden;background:var(--ck-panel)}
+.checklistScreen .ckHelp button{min-width:84px;min-height:42px;padding:6px 10px;border:0;background:transparent;color:#8fd0a2;font-weight:800;font-size:.9em}
+.checklistScreen .ckHelp button+button{border-top:1px solid var(--ck-line)}
+.ckItemWrap.done .ckHelp{border-color:#2f6b43}
+.ckHowTo{grid-column:1/-1;margin:6px 4px 2px!important;padding:12px 14px;border-radius:12px;background:#22332a;color:#e6efe8;font-size:1.05em;line-height:1.4}
+.ckCountHint{color:#fcd34d!important;font-weight:700}
+.ckCounts{display:grid;gap:12px}
+.ckCounts label{display:grid;gap:6px;font-weight:800;font-size:1.1em}
+.ckCounts input{min-height:72px;padding:8px 14px;border-radius:14px;border:2px solid #4b5f51;background:#0f1611;color:#fff;font:inherit;font-size:2em;font-weight:900;font-variant-numeric:tabular-nums}
+.ckVideo section{width:min(960px,100%);max-height:96dvh}
+.ckVideoTop{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.checklistScreen .ckClose{min-height:64px;padding:8px 22px;border:2px solid #fca5a5;border-radius:14px;background:#4a1f1a;font-weight:900;font-size:1.15em}
+.ckVideoFrame{position:relative;aspect-ratio:16/9;width:100%;border-radius:12px;overflow:hidden;background:#000}
+.ckVideoFrame iframe{position:absolute;inset:0;width:100%;height:100%;border:0}

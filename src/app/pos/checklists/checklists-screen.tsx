@@ -4,15 +4,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { defaultChecklistId } from "@/lib/store-checklist-rules";
 
-type Check = { id: number; employeeName: string; checkedAt: string };
-type Item = { id: string; label: string; check: Check | null };
+type Check = { id: number; employeeName: string; checkedAt: string; counts: Record<string, number> | null };
+type Item = { id: string; label: string; howTo: string; video: string | null; countFields: string[]; check: Check | null };
 type List = { id: string; name: string; opensAtHour: number; items: Item[] };
 type Salad = { id: string; name: string };
 type Batch = { id: number; businessDate: string; saladId: string; saladName: string; employeeName: string; madeAt: string; batchSize: string; notes: string };
 type Screen = { businessDate: string; lists: List[]; salads: Salad[]; batches: Batch[] };
 type Worker = { employeeId: string; name: string; expiresAt: number };
 type Action =
-  | { action: "check"; itemIds: string[]; bulk?: boolean }
+  | { action: "check"; itemIds: string[]; bulk?: boolean; counts?: Record<string, string> }
   | { action: "uncheck"; itemId: string; reason: string }
   | { action: "salad"; saladId: string }
   | { action: "batch"; id: number; batchSize: string; notes: string }
@@ -25,6 +25,7 @@ const time = (iso: string) => new Intl.DateTimeFormat("en-US", { timeZone: "Amer
 const dayTime = (iso: string, today: string, businessDate: string) =>
   businessDate === today ? `Today ${time(iso)}` : new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", hour: "numeric", minute: "2-digit" }).format(new Date(iso));
 const first = (name: string) => name.split(/\s+/)[0];
+const countText = (counts: Record<string, number> | null) => (counts ? Object.entries(counts).map(([field, value]) => `${field} ${value}`).join(" · ") : "");
 
 export default function ChecklistsScreen() {
   const [screen, setScreen] = useState<Screen | null>(null);
@@ -35,6 +36,9 @@ export default function ChecklistsScreen() {
   const [undo, setUndo] = useState<{ item: Item } | null>(null);
   const [confirmAll, setConfirmAll] = useState<List | null>(null);
   const [logged, setLogged] = useState<Batch | null>(null);
+  const [counting, setCounting] = useState<Item | null>(null);
+  const [openHow, setOpenHow] = useState<string>("");
+  const [video, setVideo] = useState<{ title: string; src: string } | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -165,7 +169,8 @@ export default function ChecklistsScreen() {
 
       {list && (() => {
         const done = list.items.filter((item) => item.check).length;
-        const remaining = list.items.filter((item) => !item.check);
+        // Count jobs need their numbers, so "Mark the rest done" leaves them.
+        const remaining = list.items.filter((item) => !item.check && !item.countFields.length);
         return (
           <section className="ckList" aria-label={list.name}>
             <div className="ckProgress">
@@ -175,14 +180,24 @@ export default function ChecklistsScreen() {
             {list.items.length === 0 && <p className="ckEmpty">Nothing on this list yet. A manager can add jobs in Settings.</p>}
             <div className="ckItems">
               {list.items.map((item) => (
-                <button type="button" key={item.id} disabled={busy} className={item.check ? "ckItem done" : "ckItem"}
-                  onClick={() => (item.check ? setUndo({ item }) : void run({ action: "check", itemIds: [item.id] }))}>
-                  <span className="ckBox" aria-hidden>{item.check ? "✓" : ""}</span>
-                  <span className="ckLabel">
-                    <strong>{item.label}</strong>
-                    {item.check && <small>{first(item.check.employeeName)} · {time(item.check.checkedAt)}</small>}
-                  </span>
-                </button>
+                <div key={item.id} className={item.check ? "ckItemWrap done" : "ckItemWrap"}>
+                  <button type="button" disabled={busy} className={item.check ? "ckItem done" : "ckItem"}
+                    onClick={() => (item.check ? setUndo({ item }) : item.countFields.length ? setCounting(item) : void run({ action: "check", itemIds: [item.id] }))}>
+                    <span className="ckBox" aria-hidden>{item.check ? "✓" : item.countFields.length ? "#" : ""}</span>
+                    <span className="ckLabel">
+                      <strong>{item.label}</strong>
+                      {item.check && <small>{first(item.check.employeeName)} · {time(item.check.checkedAt)}{item.check.counts ? ` · ${countText(item.check.counts)}` : ""}</small>}
+                      {!item.check && item.countFields.length > 0 && <small className="ckCountHint">Tap to count: {item.countFields.join(", ")}</small>}
+                    </span>
+                  </button>
+                  {(item.howTo || item.video) && (
+                    <div className="ckHelp">
+                      {item.howTo && <button type="button" aria-expanded={openHow === item.id} onClick={() => setOpenHow((current) => (current === item.id ? "" : item.id))}>{openHow === item.id ? "Hide" : "How?"}</button>}
+                      {item.video && <button type="button" onClick={() => setVideo({ title: item.label, src: item.video! })}>▶ Watch how</button>}
+                    </div>
+                  )}
+                  {openHow === item.id && <p className="ckHowTo">{item.howTo}</p>}
+                </div>
               ))}
             </div>
             {remaining.length > 1 && (
@@ -223,7 +238,21 @@ export default function ChecklistsScreen() {
         </section>
       )}
 
-      {pinFor && <PinPad onCancel={() => setPinFor(null)} onPin={signIn} title={pinFor.action === "salad" ? "Who made it?" : pinFor.action === "uncheck" ? "Who is un-checking?" : "Who did it?"} />}
+      {counting && <CountDialog item={counting} onCancel={() => setCounting(null)} onSave={(counts) => { const item = counting; setCounting(null); void run({ action: "check", itemIds: [item.id], counts }); }} />}
+
+      {video && (
+        <div className="ckModal ckVideo" role="dialog" aria-modal="true" aria-label={`How to: ${video.title}`}>
+          <section>
+            <div className="ckVideoTop"><h2>{video.title}</h2><button type="button" className="ckClose" onClick={() => setVideo(null)}>✕ Close</button></div>
+            <div className="ckVideoFrame">
+              {/* The page itself sends no referrer to other sites; YouTube's player needs one to start. */}
+              <iframe src={video.src} title={`How to: ${video.title}`} allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen referrerPolicy="strict-origin-when-cross-origin" />
+            </div>
+          </section>
+        </div>
+      )}
+
+      {pinFor && <PinPad onCancel={() => setPinFor(null)} onPin={signIn} title={pinFor.action === "salad" ? "Who made it?" : pinFor.action === "uncheck" ? "Who is un-checking?" : pinFor.action === "check" && pinFor.counts ? "Who counted?" : "Who did it?"} />}
 
       {undo && (
         <div className="ckModal" role="dialog" aria-modal="true" aria-label="Un-check">
@@ -245,10 +274,11 @@ export default function ChecklistsScreen() {
         <div className="ckModal" role="dialog" aria-modal="true" aria-label="Mark the rest done">
           <section>
             <h2>Mark the rest of {confirmAll.name} done?</h2>
-            <ul>{confirmAll.items.filter((item) => !item.check).map((item) => <li key={item.id}>{item.label}</li>)}</ul>
+            <ul>{confirmAll.items.filter((item) => !item.check && !item.countFields.length).map((item) => <li key={item.id}>{item.label}</li>)}</ul>
+            {confirmAll.items.some((item) => !item.check && item.countFields.length) && <p>Counts ({confirmAll.items.filter((item) => !item.check && item.countFields.length).map((item) => item.label).join(", ")}) still need their numbers: tap each one.</p>}
             <p>{worker ? `They'll be checked off as ${worker.name}.` : "You'll type your PIN next."}</p>
             <div className="ckChoices">
-              <button type="button" className="ckYes" disabled={busy} onClick={() => { const target = confirmAll; setConfirmAll(null); void run({ action: "check", itemIds: target.items.filter((item) => !item.check).map((item) => item.id), bulk: true }); }}>Yes, all done</button>
+              <button type="button" className="ckYes" disabled={busy} onClick={() => { const target = confirmAll; setConfirmAll(null); void run({ action: "check", itemIds: target.items.filter((item) => !item.check && !item.countFields.length).map((item) => item.id), bulk: true }); }}>Yes, all done</button>
               <button type="button" className="ckCancel" onClick={() => setConfirmAll(null)}>Cancel</button>
             </div>
           </section>
@@ -295,6 +325,33 @@ function BatchSheet({ batch, busy, onClose, onSave, onUndo }: { batch: Batch; bu
             <button type="button" className="ckCancel" onClick={onClose}>OK</button>
           </div>
         )}
+      </section>
+    </div>
+  );
+}
+
+/** Big number boxes for a count job ("On hand", "Made today"); the PIN comes after if nobody is signed in. */
+function CountDialog({ item, onSave, onCancel }: { item: Item; onSave: (counts: Record<string, string>) => void; onCancel: () => void }) {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const ready = item.countFields.every((field) => /^\d{1,5}$/.test(values[field] || ""));
+  return (
+    <div className="ckModal" role="dialog" aria-modal="true" aria-label={item.label}>
+      <section>
+        <h2>{item.label}</h2>
+        {item.howTo && <p>{item.howTo}</p>}
+        <form className="ckCounts" onSubmit={(event) => { event.preventDefault(); if (ready) onSave(values); }}>
+          {item.countFields.map((field, index) => (
+            <label key={field}>
+              <span>{field}</span>
+              <input inputMode="numeric" pattern="[0-9]*" autoFocus={index === 0} autoComplete="off" value={values[field] || ""}
+                onChange={(event) => setValues((current) => ({ ...current, [field]: event.target.value.replace(/\D/g, "").slice(0, 5) }))} />
+            </label>
+          ))}
+          <div className="ckChoices">
+            <button type="submit" className="ckYes" disabled={!ready}>Save count</button>
+            <button type="button" className="ckCancel" onClick={onCancel}>Cancel</button>
+          </div>
+        </form>
       </section>
     </div>
   );

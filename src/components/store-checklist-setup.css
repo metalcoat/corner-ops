@@ -22,3 +22,9 @@
 .ckSetup li em{padding:1px 8px;border-radius:999px;background:#f59e0b33;font-size:.75rem;font-style:normal;font-weight:700}
 .ckSetup li.off input{text-decoration:line-through;opacity:.6}
 .ckSetupAdd{display:flex;gap:8px}.ckSetupAdd input{flex:1}
+.ckSetup li em.count{background:#60a5fa33}.ckSetup li em.how{background:#34d39933}
+.ckSetupItem{flex-basis:100%;display:grid;gap:8px;margin:4px 0 8px;padding:10px;border-radius:8px;background:color-mix(in srgb,currentColor 6%,transparent)}
+.ckSetupItem label{display:grid;gap:3px}.ckSetupItem label span{font-size:.82rem;opacity:.8}
+.ckSetup textarea{box-sizing:border-box;width:100%;padding:6px 10px;border:1px solid color-mix(in srgb,currentColor 35%,transparent);border-radius:8px;background:transparent;color:inherit;font:inherit}
+.ckSetupItem button{justify-self:start}
+.ckSetup.ckSetup label{grid-template-columns:none;padding:0;border-bottom:0}

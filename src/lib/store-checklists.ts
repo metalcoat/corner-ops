@@ -1,4 +1,4 @@
-// Store checklists and the deli salad log (db/migrations/0049). The in-store screen (/pos/checklists) ticks
+// Store checklists and the deli salad log (db/migrations/0049–0051). The in-store screen (/pos/checklists) ticks
 // items and logs salad batches as whoever last typed their PIN there; managers edit the lists in POS Settings or
 // the manager portal and read the history in the manager portal. Lists start over each 4 AM business day.
 import { getSql, withTransaction } from "@/lib/db";
@@ -7,7 +7,8 @@ import { businessDateOf } from "@/lib/ordering-registers";
 import { constantTimeEqual, hmacSignature } from "@/lib/security-keys";
 import { toIsoTimestamp, toIsoTimestampOrEmpty } from "@/lib/timestamp-values";
 import {
-  CHECKLIST_LIMITS, CHECKLIST_WORKER_IDLE_MS, cleanText, decodeWorker, encodeWorker, parseOpensAtHour, summarizeChecklistDay, tallyByEmployee,
+  CHECKLIST_LIMITS, CHECKLIST_WORKER_IDLE_MS, cleanText, cleanVideoUrl, decodeWorker, encodeWorker, parseCountFields, parseCounts, parseOpensAtHour,
+  summarizeChecklistDay, summarizeCounts, tallyByEmployee, youtubeEmbedUrl,
   type ChecklistWorker, type HistoryCheck, type HistoryItem, type HistoryList,
 } from "@/lib/store-checklist-rules";
 
@@ -34,11 +35,17 @@ export async function confirmWorker(worker: ChecklistWorker): Promise<ChecklistW
 const iso = (value: unknown) => toIsoTimestamp(value);
 const date = (value: unknown) => (value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10));
 
+const countsOf = (value: unknown): Record<string, number> | null => {
+  const parsed = typeof value === "string" ? JSON.parse(value) : value;
+  return parsed && typeof parsed === "object" ? (parsed as Record<string, number>) : null;
+};
+const fieldsOf = (value: unknown): string[] => (Array.isArray(value) ? value.map(String) : []);
+
 function toCheck(row: Record<string, any>): HistoryCheck & { employeeId: string } {
   return {
     id: Number(row.id), businessDate: date(row.business_date), checklistId: String(row.checklist_id), itemId: String(row.item_id),
     itemLabel: String(row.item_label), employeeId: String(row.employee_id), employeeName: String(row.employee_name),
-    checkedAt: toIsoTimestampOrEmpty(row.checked_at), bulk: Boolean(row.bulk),
+    checkedAt: toIsoTimestampOrEmpty(row.checked_at), bulk: Boolean(row.bulk), counts: countsOf(row.counts),
     undoneAt: iso(row.undone_at), undoneByName: row.undone_by_name ? String(row.undone_by_name) : null, undoReason: row.undo_reason ? String(row.undo_reason) : null,
   };
 }
@@ -64,7 +71,7 @@ export async function checklistScreen(now = new Date()) {
   since.setUTCDate(since.getUTCDate() - 3);
   const [lists, items, checks, salads, batches] = await Promise.all([
     sql`SELECT id,name,position,opens_at_hour FROM store_checklists WHERE business=${BUSINESS} AND archived_at IS NULL ORDER BY position,created_at`,
-    sql`SELECT item.id,item.checklist_id,item.label,item.position FROM store_checklist_items item JOIN store_checklists list ON list.id=item.checklist_id
+    sql`SELECT item.id,item.checklist_id,item.label,item.position,item.how_to,item.video_url,item.count_fields FROM store_checklist_items item JOIN store_checklists list ON list.id=item.checklist_id
         WHERE item.business=${BUSINESS} AND item.archived_at IS NULL AND list.archived_at IS NULL ORDER BY item.position,item.created_at`,
     sql`SELECT * FROM store_checklist_checks WHERE business=${BUSINESS} AND business_date=${today} AND undone_at IS NULL`,
     sql`SELECT id,name FROM deli_salads WHERE business=${BUSINESS} AND archived_at IS NULL ORDER BY position,created_at`,
@@ -77,7 +84,10 @@ export async function checklistScreen(now = new Date()) {
       id: String(list.id), name: String(list.name), opensAtHour: Number(list.opens_at_hour),
       items: items.filter((item) => String(item.checklist_id) === String(list.id)).map((item) => {
         const tick = ticks.get(String(item.id));
-        return { id: String(item.id), label: String(item.label), check: tick ? { id: tick.id, employeeName: tick.employeeName, checkedAt: tick.checkedAt } : null };
+        return {
+          id: String(item.id), label: String(item.label), howTo: String(item.how_to || ""), video: youtubeEmbedUrl(item.video_url), countFields: fieldsOf(item.count_fields),
+          check: tick ? { id: tick.id, employeeName: tick.employeeName, checkedAt: tick.checkedAt, counts: tick.counts ?? null } : null,
+        };
       }),
     })),
     salads: salads.map((salad) => ({ id: String(salad.id), name: String(salad.name) })),
@@ -85,14 +95,28 @@ export async function checklistScreen(now = new Date()) {
   };
 }
 
-/** Ticks items for today as this worker. Items already ticked stay as they were (first tick wins). */
-export async function checkItems(itemIds: string[], worker: ChecklistWorker, bulk = false) {
-  const ids = [...new Set(itemIds.map(String))].slice(0, CHECKLIST_LIMITS.itemsPerList);
-  if (!ids.length) throw new Error("Pick something to check off.");
+/**
+ * Ticks items for today as this worker. Items already ticked stay as they were (first tick wins). A count job
+ * is ticked on its own with its numbers; "Mark the rest done" (bulk) leaves count jobs for someone to count.
+ */
+export async function checkItems(itemIds: string[], worker: ChecklistWorker, bulk = false, countsInput?: unknown) {
+  const requested = [...new Set(itemIds.map(String))].slice(0, CHECKLIST_LIMITS.itemsPerList);
+  if (!requested.length) throw new Error("Pick something to check off.");
+  const sql = getSql();
+  const found = await sql`SELECT id,count_fields FROM store_checklist_items WHERE id=ANY(${requested}::uuid[]) AND business=${BUSINESS} AND archived_at IS NULL`;
+  const counted = found.filter((item) => fieldsOf(item.count_fields).length);
+  let counts: Record<string, number> | null = null;
+  let ids = found.map((item) => String(item.id));
+  if (bulk) ids = found.filter((item) => !fieldsOf(item.count_fields).length).map((item) => String(item.id));
+  else if (counted.length) {
+    if (found.length !== 1) throw new Error("Count jobs are checked off one at a time.");
+    counts = parseCounts(fieldsOf(counted[0].count_fields), countsInput);
+  }
+  if (!ids.length) return { checked: 0 };
   const today = businessDateOf(new Date());
-  const rows = await getSql()`
-    INSERT INTO store_checklist_checks(business,business_date,checklist_id,item_id,item_label,employee_id,employee_name,bulk)
-    SELECT ${BUSINESS}::text,${today}::date,item.checklist_id,item.id,item.label,${worker.employeeId}::text,${worker.name}::text,${bulk}::boolean
+  const rows = await sql`
+    INSERT INTO store_checklist_checks(business,business_date,checklist_id,item_id,item_label,employee_id,employee_name,bulk,counts)
+    SELECT ${BUSINESS}::text,${today}::date,item.checklist_id,item.id,item.label,${worker.employeeId}::text,${worker.name}::text,${bulk}::boolean,${counts ? JSON.stringify(counts) : null}::jsonb
     FROM store_checklist_items item WHERE item.id=ANY(${ids}::uuid[]) AND item.business=${BUSINESS} AND item.archived_at IS NULL
     ON CONFLICT (item_id,business_date) WHERE undone_at IS NULL DO NOTHING
     RETURNING id`;
@@ -145,21 +169,32 @@ export async function checklistSetup() {
   const sql = getSql();
   const [lists, items, salads] = await Promise.all([
     sql`SELECT id,name,position,opens_at_hour,archived_at FROM store_checklists WHERE business=${BUSINESS} ORDER BY position,created_at`,
-    sql`SELECT id,checklist_id,label,position,placeholder,archived_at FROM store_checklist_items WHERE business=${BUSINESS} ORDER BY position,created_at`,
+    sql`SELECT id,checklist_id,label,position,placeholder,archived_at,how_to,video_url,count_fields FROM store_checklist_items WHERE business=${BUSINESS} ORDER BY position,created_at`,
     sql`SELECT id,name,position,placeholder,archived_at FROM deli_salads WHERE business=${BUSINESS} ORDER BY position,created_at`,
   ]);
   return {
     lists: lists.map((list) => ({
       id: String(list.id), name: String(list.name), opensAtHour: Number(list.opens_at_hour), active: !list.archived_at,
-      items: items.filter((item) => String(item.checklist_id) === String(list.id)).map((item) => ({ id: String(item.id), label: String(item.label), placeholder: Boolean(item.placeholder), active: !item.archived_at })),
+      items: items.filter((item) => String(item.checklist_id) === String(list.id)).map((item) => ({
+        id: String(item.id), label: String(item.label), placeholder: Boolean(item.placeholder), active: !item.archived_at,
+        howTo: String(item.how_to || ""), videoUrl: String(item.video_url || ""), countFields: fieldsOf(item.count_fields),
+      })),
     })),
     salads: salads.map((salad) => ({ id: String(salad.id), name: String(salad.name), placeholder: Boolean(salad.placeholder), active: !salad.archived_at })),
     limits: CHECKLIST_LIMITS,
   };
 }
 
-/** Adds or changes a list, item or salad. Renaming clears the placeholder tag. */
-export async function saveSetupEntry(input: { kind?: unknown; id?: unknown; name?: unknown; checklistId?: unknown; active?: unknown; opensAtHour?: unknown }, actor: string) {
+const countKeyFor = (label: string) => label.toLowerCase().replace(/\s+count$/, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+/**
+ * Adds or changes a list, item or salad. Renaming clears the placeholder tag. A job given another checklistId
+ * moves to the end of that list; its past ticks stay with it.
+ */
+export async function saveSetupEntry(input: {
+  kind?: unknown; id?: unknown; name?: unknown; checklistId?: unknown; active?: unknown; opensAtHour?: unknown;
+  howTo?: unknown; videoUrl?: unknown; countFields?: unknown;
+}, actor: string) {
   const kind = input.kind as SetupKind;
   if (!["list", "item", "salad"].includes(kind)) throw new Error("Unknown kind.");
   const name = cleanText(input.name, CHECKLIST_LIMITS.labelChars);
@@ -181,9 +216,24 @@ export async function saveSetupEntry(input: { kind?: unknown; id?: unknown; name
       return;
     }
     if (kind === "item") {
+      const howTo = input.howTo === undefined ? undefined : String(input.howTo ?? "").replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, " ").trim().slice(0, CHECKLIST_LIMITS.howToChars);
+      const videoUrl = input.videoUrl === undefined ? undefined : cleanVideoUrl(input.videoUrl);
+      const countFields = input.countFields === undefined ? undefined : parseCountFields(input.countFields);
       if (id) {
-        const rows = await sql`UPDATE store_checklist_items SET placeholder=placeholder AND label=${name},label=${name},archived_at=CASE WHEN ${active}::boolean THEN NULL ELSE COALESCE(archived_at,NOW()) END,updated_by=${actor},updated_at=NOW() WHERE id=${id}::uuid AND business=${BUSINESS} RETURNING id`;
-        if (!rows.length) throw new Error("That item no longer exists.");
+        const existing = (await sql`SELECT * FROM store_checklist_items WHERE id=${id}::uuid AND business=${BUSINESS} FOR UPDATE`)[0];
+        if (!existing) throw new Error("That item no longer exists.");
+        const fields = countFields ?? fieldsOf(existing.count_fields);
+        const countKey = fields.length ? String(existing.count_key || "") || countKeyFor(name) : "";
+        let listId = String(existing.checklist_id), position = Number(existing.position);
+        if (input.checklistId && String(input.checklistId) !== listId) {
+          const target = (await sql`SELECT id FROM store_checklists WHERE id=${String(input.checklistId)}::uuid AND business=${BUSINESS}`)[0];
+          if (!target) throw new Error("Pick a list.");
+          listId = String(target.id);
+          position = Number((await sql`SELECT COALESCE(MAX(position),0)+10 n FROM store_checklist_items WHERE checklist_id=${listId}::uuid`)[0].n);
+        }
+        await sql`UPDATE store_checklist_items SET placeholder=placeholder AND label=${name},label=${name},checklist_id=${listId}::uuid,position=${position}::int,
+          how_to=${howTo ?? String(existing.how_to || "")},video_url=${videoUrl ?? String(existing.video_url || "")},count_fields=${fields}::text[],count_key=${countKey},
+          archived_at=CASE WHEN ${active}::boolean THEN NULL ELSE COALESCE(archived_at,NOW()) END,updated_by=${actor},updated_at=NOW() WHERE id=${id}::uuid`;
         return;
       }
       const listId = String(input.checklistId || "");
@@ -191,7 +241,10 @@ export async function saveSetupEntry(input: { kind?: unknown; id?: unknown; name
       if (!list) throw new Error("Pick a list.");
       const count = Number((await sql`SELECT COUNT(*)::int n FROM store_checklist_items WHERE checklist_id=${listId}::uuid AND archived_at IS NULL`)[0].n);
       if (count >= CHECKLIST_LIMITS.itemsPerList) throw new Error(`At most ${CHECKLIST_LIMITS.itemsPerList} items on a list.`);
-      await sql`INSERT INTO store_checklist_items(checklist_id,business,label,position,updated_by) SELECT ${listId}::uuid,${BUSINESS}::text,${name}::text,COALESCE(MAX(position),0)+10,${actor}::text FROM store_checklist_items WHERE checklist_id=${listId}::uuid`;
+      const fields = countFields ?? [];
+      await sql`INSERT INTO store_checklist_items(checklist_id,business,label,how_to,video_url,count_fields,count_key,position,updated_by)
+        SELECT ${listId}::uuid,${BUSINESS}::text,${name}::text,${howTo ?? ""}::text,${videoUrl ?? ""}::text,${fields}::text[],${fields.length ? countKeyFor(name) : ""}::text,COALESCE(MAX(position),0)+10,${actor}::text
+        FROM store_checklist_items WHERE checklist_id=${listId}::uuid`;
       return;
     }
     if (id) {
@@ -237,25 +290,30 @@ export async function checklistHistory(range: { start: string; end: string }) {
   const sql = getSql();
   const [lists, items, checks, batches] = await Promise.all([
     sql`SELECT id,name,position,created_at,archived_at FROM store_checklists WHERE business=${BUSINESS}`,
-    sql`SELECT id,checklist_id,label,position,created_at,archived_at FROM store_checklist_items WHERE business=${BUSINESS}`,
+    sql`SELECT id,checklist_id,label,position,created_at,archived_at,count_fields,count_key FROM store_checklist_items WHERE business=${BUSINESS}`,
     sql`SELECT * FROM store_checklist_checks WHERE business=${BUSINESS} AND business_date BETWEEN ${range.start}::date AND ${range.end}::date ORDER BY checked_at`,
     sql`SELECT * FROM deli_salad_batches WHERE business=${BUSINESS} AND business_date BETWEEN ${range.start}::date AND ${range.end}::date ORDER BY made_at DESC`,
   ]);
   const historyLists: HistoryList[] = lists.map((row) => ({ id: String(row.id), name: String(row.name), position: Number(row.position), createdAt: toIsoTimestampOrEmpty(row.created_at), archivedAt: iso(row.archived_at) }));
-  const historyItems: HistoryItem[] = items.map((row) => ({ id: String(row.id), checklistId: String(row.checklist_id), label: String(row.label), position: Number(row.position), createdAt: toIsoTimestampOrEmpty(row.created_at), archivedAt: iso(row.archived_at) }));
+  const historyItems: HistoryItem[] = items.map((row) => ({ id: String(row.id), checklistId: String(row.checklist_id), label: String(row.label), position: Number(row.position), createdAt: toIsoTimestampOrEmpty(row.created_at), archivedAt: iso(row.archived_at),
+    countFields: fieldsOf(row.count_fields), countKey: String(row.count_key || ""),
+  }));
   const allChecks = checks.map(toCheck);
   const allBatches = batches.map(toBatch);
   const today = businessDateOf(new Date());
-  const days: Array<{ businessDate: string; finished: boolean; lists: ReturnType<typeof summarizeChecklistDay>; batches: SaladBatch[] }> = [];
+  const days: Array<{ businessDate: string; finished: boolean; lists: ReturnType<typeof summarizeChecklistDay>; batches: SaladBatch[]; counts: ReturnType<typeof summarizeCounts> }> = [];
   for (const cursor = new Date(`${range.end}T12:00:00Z`); cursor >= new Date(`${range.start}T12:00:00Z`); cursor.setUTCDate(cursor.getUTCDate() - 1)) {
     const day = cursor.toISOString().slice(0, 10);
     if (day > today) continue;
     const window = { start: businessDayBoundary(day), end: businessDayBoundary(day, true) };
-    const dayLists = summarizeChecklistDay(historyLists, historyItems, allChecks.filter((check) => check.businessDate === day), window);
+    const dayChecks = allChecks.filter((check) => check.businessDate === day);
+    const dayLists = summarizeChecklistDay(historyLists, historyItems, dayChecks, window);
     const dayBatches = allBatches.filter((batch) => batch.businessDate === day);
     // Days before any list existed (or with everything switched off) say nothing; leave them out.
     if (!dayLists.length && !dayBatches.length) continue;
-    days.push({ businessDate: day, finished: day < today, lists: dayLists, batches: dayBatches });
+    const shown = new Set(dayLists.flatMap((list) => list.items.map((item) => item.itemId)));
+    const counts = summarizeCounts(historyLists, historyItems.filter((item) => shown.has(item.id)), dayChecks);
+    days.push({ businessDate: day, finished: day < today, lists: dayLists, batches: dayBatches, counts });
   }
   return { today, start: range.start, end: range.end, days, people: tallyByEmployee(allChecks, allBatches) };
 }

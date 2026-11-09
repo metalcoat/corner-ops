@@ -6,7 +6,7 @@ import { hourLabel } from "@/lib/store-checklist-rules";
 import "./store-checklist-setup.css";
 
 type Entry = { id: string; placeholder?: boolean; active: boolean };
-type Item = Entry & { label: string };
+type Item = Entry & { label: string; howTo: string; videoUrl: string; countFields: string[] };
 type List = Entry & { name: string; opensAtHour: number; items: Item[] };
 type Salad = Entry & { name: string };
 type Setup = { lists: List[]; salads: Salad[] };
@@ -68,9 +68,9 @@ export default function StoreChecklistSetup() {
             </div>
             <ol>
               {list.items.map((item, itemIndex) => (
-                <Row key={item.id} text={item.label} entry={item} first={itemIndex === 0} last={itemIndex === list.items.length - 1}
+                <ItemRow key={item.id} item={item} listId={list.id} lists={setup.lists} first={itemIndex === 0} last={itemIndex === list.items.length - 1}
                   onMove={(direction) => move("item", item.id, direction)}
-                  onSave={(change) => void send("PUT", { kind: "item", id: item.id, name: item.label, active: item.active, ...change }, "Saved.")} />
+                  onSave={(change, done) => send("PUT", { kind: "item", id: item.id, name: item.label, active: item.active, checklistId: list.id, howTo: item.howTo, videoUrl: item.videoUrl, countFields: item.countFields, ...change }, done || "Saved.")} />
               ))}
             </ol>
             <Adder placeholder="Add a job, e.g. Clean the slicer" onAdd={(name) => send("PUT", { kind: "item", checklistId: list.id, name }, "Added.")} />
@@ -99,7 +99,7 @@ function ListEditor({ list, onSave }: { list: List; onSave: (change: { name?: st
   return (
     <div className="ckSetupList">
       <label><span>List name</span><input value={name} maxLength={80} onChange={(event) => setName(event.target.value)} /></label>
-      <label><span>Screen opens on it from</span>
+      <label><span>Start time (the screen opens on this list from)</span>
         <select value={list.opensAtHour} onChange={(event) => onSave({ opensAtHour: Number(event.target.value) })}>
           {HOURS.map((hour) => <option key={hour} value={hour}>{hourLabel(hour)}</option>)}
         </select>
@@ -107,6 +107,50 @@ function ListEditor({ list, onSave }: { list: List; onSave: (change: { name?: st
       <button type="button" disabled={!name.trim() || name === list.name} onClick={() => onSave({ name })}>Rename</button>
       <button type="button" onClick={() => onSave({ active: !list.active })}>{list.active ? "Switch list off" : "Switch list on"}</button>
     </div>
+  );
+}
+
+/** One job: wording, order and on/off at a glance; "Edit" opens the list it's on, the how-to note, video and counts. */
+function ItemRow({ item, listId, lists, first, last, onMove, onSave }: {
+  item: Item; listId: string; lists: List[]; first: boolean; last: boolean;
+  onMove: (direction: "up" | "down") => void;
+  onSave: (change: { name?: string; active?: boolean; checklistId?: string; howTo?: string; videoUrl?: string; countFields?: string }, done?: string) => Promise<boolean>;
+}) {
+  const [value, setValue] = useState(item.label);
+  const [open, setOpen] = useState(false);
+  const [howTo, setHowTo] = useState(item.howTo);
+  const [videoUrl, setVideoUrl] = useState(item.videoUrl);
+  const [counts, setCounts] = useState(item.countFields.join(", "));
+  useEffect(() => { setValue(item.label); setHowTo(item.howTo); setVideoUrl(item.videoUrl); setCounts(item.countFields.join(", ")); }, [item]);
+  const changed = howTo !== item.howTo || videoUrl !== item.videoUrl || counts !== item.countFields.join(", ") || value !== item.label;
+  return (
+    <li className={item.active ? "" : "off"}>
+      <input value={value} maxLength={80} aria-label="Wording" onChange={(event) => setValue(event.target.value)} />
+      {item.placeholder && <em>placeholder</em>}
+      {item.countFields.length > 0 && <em className="count">count</em>}
+      {(item.howTo || item.videoUrl) && <em className="how">{item.videoUrl ? "how + video" : "how"}</em>}
+      {!item.active && <em>off</em>}
+      <span>
+        {value !== item.label && !open && <button type="button" disabled={!value.trim()} onClick={() => void onSave({ name: value })}>Save</button>}
+        <button type="button" aria-label="Move up" disabled={first} onClick={() => onMove("up")}>↑</button>
+        <button type="button" aria-label="Move down" disabled={last} onClick={() => onMove("down")}>↓</button>
+        <button type="button" aria-expanded={open} onClick={() => setOpen((current) => !current)}>{open ? "Close" : "Edit"}</button>
+        <button type="button" onClick={() => void onSave({ active: !item.active })}>{item.active ? "Off" : "On"}</button>
+      </span>
+      {open && (
+        <div className="ckSetupItem">
+          <label><span>On the list</span>
+            <select value={listId} onChange={(event) => void onSave({ checklistId: event.target.value }, `Moved to ${lists.find((list) => list.id === event.target.value)?.name}.`)}>
+              {lists.map((list) => <option key={list.id} value={list.id}>{list.name}{list.active ? "" : " (off)"}</option>)}
+            </select>
+          </label>
+          <label><span>How to do it (staff tap “How?” to read it)</span><textarea rows={3} maxLength={600} value={howTo} onChange={(event) => setHowTo(event.target.value)} /></label>
+          <label><span>How-to video (YouTube link, optional)</span><input value={videoUrl} inputMode="url" placeholder="https://youtu.be/…" onChange={(event) => setVideoUrl(event.target.value)} /></label>
+          <label><span>Ask for numbers (comma separated, e.g. On hand, Made today; blank = just a check)</span><input value={counts} maxLength={80} onChange={(event) => setCounts(event.target.value)} /></label>
+          <button type="button" disabled={!changed || !value.trim()} onClick={async () => { if (await onSave({ name: value, howTo, videoUrl, countFields: counts })) setOpen(false); }}>Save job</button>
+        </div>
+      )}
+    </li>
   );
 }
 

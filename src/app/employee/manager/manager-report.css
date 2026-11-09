@@ -28,3 +28,5 @@
 .mgrPage .mgrDays button.ckDayMissed{border-color:#ef4444}.mgrDays button.ckDayMissed small{color:var(--mgr-bad)}
 .ckFilters{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0}.ckFilters select{min-height:42px;padding:6px 10px;border:1px solid var(--mgr-line);border-radius:8px;background:var(--mgr-panel);color:var(--mgr-text);font:inherit}
 .ckEdit{margin-top:22px}.ckEdit summary{min-height:42px;padding:10px 2px;color:#93c5fd;cursor:pointer;font-weight:700}
+.ckCountTable{margin:8px 0 14px;overflow-x:auto}.ckCountTable h3{margin:0 0 4px;font-size:1rem}
+.ckCountTable table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}.ckCountTable th,.ckCountTable td{padding:6px 8px;border-bottom:1px solid #1e293b;text-align:right;white-space:nowrap}.ckCountTable th:first-child,.ckCountTable td:first-child{text-align:left}.ckCountTable th{color:var(--mgr-muted);font-weight:600;font-size:.8rem}

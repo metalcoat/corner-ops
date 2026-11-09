@@ -730,9 +730,16 @@ flowchart LR
 - Lists start over each 4 AM business day (`businessDateOf`). Tables `store_checklists`, `store_checklist_items`,
   `store_checklist_checks`, `deli_salads`, `deli_salad_batches` (migration 0049, which also seeds placeholder jobs;
   0050 sets the real salads Chris gave 2026-11-09: Macaroni, Potato, Pasta, Green Bean, Brown Bean, Cole Slaw,
-  Antipasto; **apply 0049 and 0050 on production at the switchover**). Code: `src/lib/store-checklists.ts`,
+  Antipasto; **apply 0049–0051 on production at the switchover**). Code: `src/lib/store-checklists.ts`,
   pure rules `src/lib/store-checklist-rules.ts` (tests `tests/store-checklists.test.ts`).
-- Managers edit lists, jobs (wording, order, on/off) and salads in POS Settings (overview) or the manager portal
+- Jobs (migration 0051, Chris's real lists 2026-11-09: Opening/prep 44, Mid-day 5, Closing 15; two marked placeholder
+  until Chris confirms them) can carry a how-to note (a small "How?" button opens it without ticking the job), a
+  YouTube how-to video ("▶ Watch how" plays it in an overlay; only https YouTube links are accepted,
+  `youtubeEmbedUrl`), and count fields: Sub rolls, Hamburger buns and Pizza dough are counted at Opening (On hand /
+  Made today), Mid-day and Closing (On hand / Made this shift). A count is typed in with the tick and saved in
+  `store_checklist_checks.counts`; "Mark the rest done" leaves counts for someone to count. History shows a per-day
+  table per counted thing (start, shift change, close, made), grouped by `count_key`.
+- Managers edit lists (name, start time), jobs (wording, order, which list, how-to, video, counts, on/off) and salads in POS Settings (overview) or the manager portal
   (`/employee/manager?tab=checklists` → Edit lists & salads); `GET/PUT/PATCH /api/employee/manager-report/checklists/setup`.
   Switching off keeps history. History: manager portal → Checklists & salads (day/week/month): each job with who and
   when, missed jobs, un-checks, salad batches filtered by salad or person, and a by-person tally
@@ -855,5 +862,5 @@ flowchart LR
 5. Missed-call alerts read `rezku_shifts` to know who is on shift — move to the new clock.
 6. Staff re-enable notifications on team.ordercornerdeli.com (old Vercel installs).
 7. Rezku menu capture workflow fails on the runner (needs sudo for browser deps); retire with Rezku.
-8. Store checklists (§8d-1): apply migrations 0049–0050 on production and replace the placeholder jobs.
+8. Store checklists (§8d-1): apply migrations 0049–0051 on production; Chris to confirm the two placeholder jobs.
 9. MX: questions to MX support (terminal model, fees, receipts, PIN debit tips, can the Dejavoo Z6 read our own gift card stripes for the POS) before ordering hardware.
