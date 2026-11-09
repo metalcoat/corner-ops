@@ -58,6 +58,7 @@
     "src/lib/complex-buildings.ts",
     "src/lib/ordering-employee-drink-rules.ts",
     "src/lib/shift-coverage-rules.ts",
+    "src/lib/store-checklist-rules.ts",
     "src/lib/ny-tipped-wage.ts",
     "src/lib/payroll-overtime-rules.ts",
     "src/lib/schedule-overtime-hint.ts",

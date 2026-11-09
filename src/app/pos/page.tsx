@@ -15,6 +15,7 @@ const SECTIONS: Array<{ title: string; note?: string; items: HomeItem[] }> = [
       { href: "/pos/deli/kitchen", icon: "🍳", title: "Kitchen display", detail: "Tickets for the line." },
       { href: "/display/deli", icon: "🖥️", title: "Customer display", detail: "Facing the customer: order, tip, receipt." },
       { href: "/pos/labels", icon: "🏷️", title: "Labels", detail: "Sticker label for each sub and pizza." },
+      { href: "/pos/checklists", icon: "✅", title: "Checklists", detail: "Opening and closing jobs, deli salad log. Tap, PIN, done." },
       { href: "/pos/board", icon: "📺", title: "Status board", detail: "Order status for the monitor. Stays signed in." },
       { href: "/kiosk/deli", icon: "🙋", title: "Self-order kiosk", detail: "Customers order themselves." },
     ],

@@ -5,8 +5,9 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import "./screen-gate.css";
 
-type Kind = "board" | "labels";
-const TITLES: Record<Kind, string> = { board: "Status board", labels: "Label station" };
+type Kind = "board" | "labels" | "checklists";
+const TITLES: Record<Kind, string> = { board: "Status board", labels: "Label station", checklists: "Checklists" };
+const HOMES: Record<Kind, string> = { board: "/pos/board", labels: "/pos/labels", checklists: "/pos/checklists" };
 
 /** title/returnTo let another always-on page (the store dashboard) reuse the status board's screen pass. */
 export default function ScreenGate({ kind, children, title, returnTo }: { kind: Kind; children: ReactNode; title?: string; returnTo?: string }) {
@@ -81,7 +82,7 @@ export default function ScreenGate({ kind, children, title, returnTo }: { kind: 
             <p>It will stay on the {heading.toLowerCase()} and never time out. A manager can sign it out any time under Settings → Printers &amp; devices.</p>
             <label>
               Name this screen
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder={kind === "board" ? "Front monitor" : "Sub station"} />
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder={kind === "board" ? "Front monitor" : kind === "checklists" ? "Deli screen" : "Sub station"} />
             </label>
             <button disabled={busy} onClick={() => void keep(false)}>{busy ? "Saving…" : "Keep signed in"}</button>
           </>
@@ -100,7 +101,7 @@ export default function ScreenGate({ kind, children, title, returnTo }: { kind: 
               </label>
               <button disabled={busy || pin.length < 4}>{busy ? "Signing in…" : "Sign in"}</button>
             </form>
-            <a className="screenAlt" href={`/signin?returnTo=${encodeURIComponent(returnTo || (kind === "board" ? "/pos/board" : "/pos/labels"))}`}>
+            <a className="screenAlt" href={`/signin?returnTo=${encodeURIComponent(returnTo || HOMES[kind])}`}>
               Or sign in with the office login
             </a>
           </>

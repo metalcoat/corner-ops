@@ -22,6 +22,7 @@ export default async function EmployeeLayout({ children }: Readonly<{ children: 
       <nav className="employeePortalNav" aria-label="Employee Hub navigation">
         <a href="/employee">Home</a>
         {manager && <a href="/employee/manager">Daily report</a>}
+        {manager && <a href="/employee/manager?tab=checklists">Checklists</a>}
         {manager && <a href="/employee/manager/orders">Order search</a>}
         {manager && <a href="/employee/manager/house-accounts">House accounts</a>}
         <a href="/employee/deliveries">My deliveries</a>

@@ -1,4 +1,4 @@
-// Always-on store screens (the status board monitor and the label station)
+// Always-on store screens (the status board monitor, the label station and the checklist screen)
 // must never time out. Once someone signs in on one, the screen keeps its own
 // pass for that one view; it lasts until a manager signs the screen out.
 import { randomUUID } from "node:crypto";
@@ -9,7 +9,7 @@ import { getPosSession } from "@/lib/pos-auth";
 import { secureCookies } from "@/lib/cookie-security";
 import { constantTimeEqual, hmacSignature } from "@/lib/security-keys";
 
-export type ScreenKind = "board" | "labels";
+export type ScreenKind = "board" | "labels" | "checklists";
 const COOKIE = (kind: ScreenKind) => `corner_ops_screen_${kind}`;
 const TEN_YEARS = 60 * 60 * 24 * 365 * 10;
 
@@ -59,7 +59,7 @@ export async function signInScreen(kind: ScreenKind, name: string) {
   if (!signer) throw new Error("Sign in first, then keep this screen signed in.");
   await ensureSchema();
   const id = randomUUID();
-  const label = name.trim().slice(0, 60) || (kind === "board" ? "Status board" : "Label station");
+  const label = name.trim().slice(0, 60) || (kind === "board" ? "Status board" : kind === "checklists" ? "Checklist screen" : "Label station");
   await getSql()`INSERT INTO ordering_store_screens(id,business,kind,name,signed_in_by) VALUES(${id},'Corner Deli',${kind},${label},${signer.name})`;
   const body = Buffer.from(JSON.stringify({ id, kind }), "utf8").toString("base64url");
   (await cookies()).set(COOKIE(kind), `${body}.${sign(body)}`, { httpOnly: true, sameSite: "lax", secure: secureCookies(), path: "/", maxAge: TEN_YEARS });

@@ -10,7 +10,8 @@ import BarcodeSettingsClient from "./barcode-settings-client";
 import HardwareSettingsClient from "./hardware-settings-client";
 import AiPhoneSettingsClient from "./ai-phone-settings-client";
 import AiPhoneRulesClient from "./ai-phone-rules-client";
+import StoreChecklistSetup from "@/components/store-checklist-setup";
 
 export default function DeliDeliverySettingsPage() {
-  return <><AiPhoneSettingsClient /><AiPhoneRulesClient /><PosSettingsClient /><HardwareSettingsClient /><GreeterTvSettingsClient /><LobbyTriviaSettingsClient /><StoreOperationsSettingsClient /><DeliverySettingsClient /><PromotionsSettingsClient /><LoyaltySettingsClient /><GiftCardSettingsClient /><BarcodeSettingsClient /></>;
+  return <><AiPhoneSettingsClient /><AiPhoneRulesClient /><PosSettingsClient /><HardwareSettingsClient /><GreeterTvSettingsClient /><LobbyTriviaSettingsClient /><StoreOperationsSettingsClient /><StoreChecklistSetup /><DeliverySettingsClient /><PromotionsSettingsClient /><LoyaltySettingsClient /><GiftCardSettingsClient /><BarcodeSettingsClient /></>;
 }

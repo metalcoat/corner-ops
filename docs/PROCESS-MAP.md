@@ -716,6 +716,28 @@ flowchart LR
 - Open: one tap "Open with $X", X = the amount confirmed at the last closeout; a different amount needs a note
   (audit `register_opened` records expected vs actual). Expected cash at the next close starts from that amount.
 
+## 8d-1. Store checklists and deli salad log (Corner Deli, dev)
+
+- Asked for by Chris 2026-11-08: track who did each opening/closing job and who made each deli salad, without getting
+  in the staff's way. Screen: `/pos/checklists` (POS home tile "Checklists", Front counter), an always-on screen pass
+  like the status board (`ScreenGate kind="checklists"`, `ordering_store_screens.kind` 'checklists'). Tabs per list
+  (Opening / Mid-day / Closing, editable) plus Deli salads; it opens on the list whose "opens from" hour last passed.
+- Who: the first tap asks for a PIN (`POST /api/pos/checklists` action `signin`, the POS PIN check and attempt limits,
+  but nobody is signed into the POS). The screen then keeps that person for 3 idle minutes (a signed pass,
+  `CHECKLIST_WORKER_IDLE_MS`; every tap extends it; "Done — sign out" ends it). "Mark the rest done" ticks all remaining
+  jobs on a list at once (`bulk`, shown as "marked with the rest" in history). Un-checking needs a reason and keeps
+  the row (who/when/why). A salad button logs a batch in one tap (+ PIN); size/note are optional, Undo removes a mis-tap.
+- Lists start over each 4 AM business day (`businessDateOf`). Tables `store_checklists`, `store_checklist_items`,
+  `store_checklist_checks`, `deli_salads`, `deli_salad_batches` (migration 0049, which also seeds placeholder jobs and
+  the menu's Deli Salads; **apply 0049 on production at the switchover**). Code: `src/lib/store-checklists.ts`,
+  pure rules `src/lib/store-checklist-rules.ts` (tests `tests/store-checklists.test.ts`).
+- Managers edit lists, jobs (wording, order, on/off) and salads in POS Settings (overview) or the manager portal
+  (`/employee/manager?tab=checklists` → Edit lists & salads); `GET/PUT/PATCH /api/employee/manager-report/checklists/setup`.
+  Switching off keeps history. History: manager portal → Checklists & salads (day/week/month): each job with who and
+  when, missed jobs, un-checks, salad batches filtered by salad or person, and a by-person tally
+  (`GET /api/employee/manager-report/checklists`). Works on the team domain from a phone.
+- The older `/deli-board` wallboard has its own unused prep task list (`deli_wallboard_tasks`); it is separate.
+
 ## 8e. Ordering prices, checkout and rewards
 
 - Web and kiosk customers review the server-priced order before placing it, so they can apply pizza and points
@@ -790,4 +812,5 @@ flowchart LR
 5. Missed-call alerts read `rezku_shifts` to know who is on shift — move to the new clock.
 6. Staff re-enable notifications on team.ordercornerdeli.com (old Vercel installs).
 7. Rezku menu capture workflow fails on the runner (needs sudo for browser deps); retire with Rezku.
-8. MX: questions to MX support (terminal model, fees, receipts, PIN debit tips, can the Dejavoo Z6 read our own gift card stripes for the POS) before ordering hardware.
+8. Store checklists (§8d-1): apply migration 0049 on production and replace the placeholder jobs/salads.
+9. MX: questions to MX support (terminal model, fees, receipts, PIN debit tips, can the Dejavoo Z6 read our own gift card stripes for the POS) before ordering hardware.

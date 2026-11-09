@@ -3,12 +3,12 @@ import { currentScreen, listScreens, revokeScreen, screenSigner, signInScreen, s
 
 export const runtime = "nodejs";
 const kindFrom = (value: unknown): ScreenKind => {
-  if (value === "board" || value === "labels") return value;
+  if (value === "board" || value === "labels" || value === "checklists") return value;
   throw new Error("Unknown screen.");
 };
 const fail = (error: unknown, status = 400) => isoJson({ error: error instanceof Error ? error.message : "Screen update failed." }, { status });
 
-/** ?kind=board|labels → this screen's pass; ?list=1 → every signed-in screen (managers). */
+/** ?kind=board|labels|checklists → this screen's pass; ?list=1 → every signed-in screen (managers). */
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);

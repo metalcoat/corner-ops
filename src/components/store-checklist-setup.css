@@ -1,0 +1,24 @@
+/* Works on the light POS Settings cards and the dark manager portal: colors come from the surrounding text. */
+.ckSetup{display:grid;gap:10px;margin-top:24px;padding:16px;border:1px solid color-mix(in srgb,currentColor 25%,transparent);border-radius:12px}
+.ckSetup h2,.ckSetup h3,.ckSetup p{margin:0}
+.ckSetup fieldset{display:grid;gap:10px;margin:0;padding:0;border:0;min-width:0}
+.ckSetupHint{opacity:.8}
+.ckSetupMessage{font-weight:700}
+.ckSetup details{border:1px solid color-mix(in srgb,currentColor 20%,transparent);border-radius:10px;padding:8px 12px}
+.ckSetup details.off{opacity:.65}
+.ckSetup summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;min-height:40px;cursor:pointer}
+.ckSetup summary small{opacity:.75}
+.ckSetup button{min-height:40px;padding:6px 12px;border:1px solid color-mix(in srgb,currentColor 35%,transparent);border-radius:8px;background:color-mix(in srgb,currentColor 8%,transparent);color:inherit;font:inherit;cursor:pointer}
+.ckSetup button:disabled{opacity:.4;cursor:default}
+.ckSetup input,.ckSetup select{box-sizing:border-box;min-height:40px;padding:6px 10px;border:1px solid color-mix(in srgb,currentColor 35%,transparent);border-radius:8px;background:transparent;color:inherit;font:inherit;min-width:0}
+.ckSetup select option{color:#111;background:#fff}
+.ckSetupList{display:flex;flex-wrap:wrap;align-items:end;gap:8px;margin:8px 0}
+.ckSetupList label{display:grid;gap:3px}.ckSetupList label span{font-size:.8rem;opacity:.8}
+.ckSetupMoves{display:flex;gap:8px;margin-bottom:6px}
+.ckSetup ol{display:grid;gap:6px;margin:6px 0;padding-left:1.6em}
+.ckSetup li{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.ckSetup li input{flex:1 1 220px}
+.ckSetup li span{display:flex;gap:4px}
+.ckSetup li em{padding:1px 8px;border-radius:999px;background:#f59e0b33;font-size:.75rem;font-style:normal;font-weight:700}
+.ckSetup li.off input{text-decoration:line-through;opacity:.6}
+.ckSetupAdd{display:flex;gap:8px}.ckSetupAdd input{flex:1}

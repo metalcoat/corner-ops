@@ -907,7 +907,7 @@ export default function HardwareSettingsClient() {
             {screens.map((screen) => (
               <li key={screen.id}>
                 <span>
-                  <strong>{screen.name}</strong> · {screen.kind === "board" ? "Status board" : "Label station"}
+                  <strong>{screen.name}</strong> · {screen.kind === "board" ? "Status board" : screen.kind === "checklists" ? "Checklist screen" : "Label station"}
                   <small>
                     Signed in by {screen.signed_in_by} · last seen {new Date(screen.last_seen_at).toLocaleString()}
                   </small>

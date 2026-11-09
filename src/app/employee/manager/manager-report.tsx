@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ManagerReport as Report, ManagerReportView } from "@/lib/ordering-manager-report";
 import BusyTimes from "./busy-times";
+import ChecklistHistory from "./checklist-history";
 import "./manager-report.css";
 
 const money = (cents: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
@@ -26,7 +27,9 @@ function Row({ title, detail, amount, tone, flag }: { title: string; detail?: st
 
 export default function ManagerReport() {
   const [view, setView] = useState<ManagerReportView>("day");
-  const [mode, setMode] = useState<"report" | "busy">("report");
+  const [mode, setMode] = useState<"report" | "busy" | "checklists">("report");
+  // ?tab=checklists opens straight on the checklists (a link from the employee app home).
+  useEffect(() => { if (new URLSearchParams(window.location.search).get("tab") === "checklists") setMode("checklists"); }, []);
   const [date, setDate] = useState("");
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState("");
@@ -53,7 +56,7 @@ export default function ManagerReport() {
   return (
     <main className="mgrPage">
       <header className="mgrHeader">
-        <h1>{mode === "busy" ? "Busy times" : "Daily report"}</h1>
+        <h1>{mode === "busy" ? "Busy times" : mode === "checklists" ? "Checklists" : "Daily report"}</h1>
         <a className="osLink" href="/employee/manager/orders">Order search</a>
         <a className="osLink" href="/employee/metrics">Sales metrics</a>
         <a className="osLink" href="/employee/manager/house-accounts">House accounts</a>
@@ -62,7 +65,7 @@ export default function ManagerReport() {
         </nav>
       </header>
       <nav className="mgrModes" aria-label="Report">
-        {([["report", "Money & tills"], ["busy", "Busy times"]] as const).map(([option, label]) => <button type="button" key={option} className={mode === option ? "active" : ""} aria-pressed={mode === option} onClick={() => setMode(option)}>{label}</button>)}
+        {([["report", "Money & tills"], ["busy", "Busy times"], ["checklists", "Checklists & salads"]] as const).map(([option, label]) => <button type="button" key={option} className={mode === option ? "active" : ""} aria-pressed={mode === option} onClick={() => setMode(option)}>{label}</button>)}
       </nav>
       <div className="mgrDate">
         <button type="button" aria-label="Previous" disabled={!shown} onClick={() => setDate(move(view, shown, -1))}>‹</button>
@@ -72,6 +75,7 @@ export default function ManagerReport() {
       </div>
       {error && <p className="mgrError" role="alert">{error}</p>}
       {report && mode === "busy" && <BusyTimes view={view} date={report.date} onOpenDay={openDay} />}
+      {report && mode === "checklists" && <ChecklistHistory view={view} date={report.date} onOpenDay={openDay} />}
       {report && totals && mode === "report" && <>
         <section className="mgrTiles" aria-label="Summary">
           <article><span>Sales</span><strong>{money(totals.salesCents)}</strong><small>{totals.orders} orders</small></article>
