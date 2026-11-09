@@ -204,6 +204,8 @@ function isDeliPosApi(path: string): boolean {
       "payments",
       "tips",
       "labels",
+      // Menu item photos on the POS buttons (read-only; the online page uses /api/customer/media).
+      "media",
       "device-setup",
       "car-tablets",
       "house-accounts",
