@@ -786,7 +786,7 @@ flowchart LR
   across daylight-saving changes. A first submission of a web order whose selected time has passed fails before
   charging or sending; staff reopening an already-sent order keeps its existing behavior. Unconfigured hours
   block web submission. Slot capacity limits are not implemented.
-- Employee drinks at cost (dev, 2026-11-06): 🥤 in the deli toolbar (DRINK in the shared POS bar) for the signed-in PIN
+- Employee drinks at cost (dev, 2026-11-06): the DRINKS tab of the deli toolbar 🍽 employee menu (meal and drinks in one section since 2026-11-09; DRINK in the shared POS bar) for the signed-in PIN
   employee. Only the "12 - 20 oz Soda" and "2 Liter" categories. Price = (cost + bottle deposit) × (1 + tax), rounded up
   to the next $0.25 (20 oz $1.29 → $1.50, 2 L $2.00 → $2.25; `ordering-employee-drink-rules.ts`); costs in `ordering_employee_drink_prices` (migration 0043),
   edited in POS settings > Operations. The order goes in at menu price (stock comes off on submit), the difference

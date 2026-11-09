@@ -42,6 +42,14 @@ function roomBuffer(context: AudioContext) {
   return buffer;
 }
 
+/**
+ * How long audio must stay blocked before the "sound is off" prompt shows. A new or
+ * resuming AudioContext reports "suspended" until resume() settles, and every tap
+ * (including PIN digits) resumes it, so showing it at once made the prompt flash in
+ * and out and shove the screen around mid-tap.
+ */
+const SOUND_BLOCKED_GRACE_MS = 2_000;
+
 /** Unacknowledged new online orders re-chime on this interval. */
 const REPEAT_ALERT_MS = 20_000;
 
@@ -91,12 +99,33 @@ export function useOnlineOrderAlert(
   const [pendingOnlineOrders, setPendingOnlineOrders] = useState(0);
   const [paymentReviews, setPaymentReviews] = useState<PaymentReview[]>([]);
   const [soundBlocked, setSoundBlocked] = useState(false);
+  const signedIn = useRef(authenticated);
+  const blockedTimer = useRef<number | null>(null);
 
   const refreshSoundBlocked = useCallback(() => {
-    setSoundBlocked(
+    const blocked =
+      signedIn.current &&
       preference.current.sound !== "off" &&
-        audio.current?.state !== "running",
-    );
+      audio.current?.state !== "running";
+    if (!blocked) {
+      if (blockedTimer.current !== null) window.clearTimeout(blockedTimer.current);
+      blockedTimer.current = null;
+      setSoundBlocked(false);
+      return;
+    }
+    if (blockedTimer.current !== null) return;
+    blockedTimer.current = window.setTimeout(() => {
+      blockedTimer.current = null;
+      setSoundBlocked(
+        signedIn.current &&
+          preference.current.sound !== "off" &&
+          audio.current?.state !== "running",
+      );
+    }, SOUND_BLOCKED_GRACE_MS);
+  }, []);
+
+  useEffect(() => () => {
+    if (blockedTimer.current !== null) window.clearTimeout(blockedTimer.current);
   }, []);
 
   const unlockAudio = useCallback(() => {
@@ -212,11 +241,12 @@ export function useOnlineOrderAlert(
   }, [unlockAudio, ringPending]);
 
   useEffect(() => {
+    signedIn.current = authenticated;
     if (!authenticated) {
       alertState.current = createOnlineAlertState();
       setPendingOnlineOrders(0);
       setPaymentReviews([]);
-      setSoundBlocked(false);
+      refreshSoundBlocked();
       return;
     }
     void unlockAudio();
@@ -264,7 +294,7 @@ export function useOnlineOrderAlert(
       window.clearInterval(timer);
       window.clearInterval(repeat);
     };
-  }, [authenticated, ringPending, unlockAudio]);
+  }, [authenticated, ringPending, unlockAudio, refreshSoundBlocked]);
 
   useEffect(() => {
     if (

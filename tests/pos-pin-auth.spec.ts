@@ -33,13 +33,13 @@ test("Deli POS uses PIN, prompts explicit clock-in, and locks without clock-out"
   expect(posCookie!.value.includes(active)).toBe(false);
   const backOffice=await page.request.get("/api/banking?business=Corner%20Deli");
   expect(backOffice.status()).toBe(401);
-  await page.getByRole("button",{name:"SWITCH EMPLOYEE"}).click();
+  await page.getByRole("button",{name:"LOG OUT"}).click();
   await expect(page.getByRole("region",{name:"Corner Deli employee PIN login"})).toBeVisible();
   await enterPin(page,idle);
   await expect(page.getByText("You're not clocked in.")).toBeVisible();
   await page.getByRole("button",{name:"CLOCK IN & CONTINUE"}).dblclick();
   await expect(page.getByText("Playwright POS Employee Idle",{exact:true})).toBeVisible();
-  await page.getByRole("button",{name:"SWITCH EMPLOYEE"}).click();
+  await page.getByRole("button",{name:"LOG OUT"}).click();
   await enterPin(page,idle);
   await expect(page.getByText("Playwright POS Employee Idle",{exact:true})).toBeVisible();
   await expect(page.getByText("You're not clocked in.")).toHaveCount(0);
@@ -57,7 +57,7 @@ test("manual lock preserves the order and synchronizes POS and kitchen tabs",asy
   await page.evaluate(()=>{(window as typeof window&{auditLockMarker?:string}).auditLockMarker='preserve';});
   const kitchen=await context.newPage(); await kitchen.goto("/pos/deli/kitchen");
   await expect(kitchen.getByText("Corner Deli Kitchen",{exact:true})).toBeVisible();
-  await page.getByRole("button",{name:"SWITCH EMPLOYEE"}).click();
+  await page.getByRole("button",{name:"LOG OUT"}).click();
   await expect(page.getByRole("region",{name:"Corner Deli employee PIN login"})).toBeVisible();
   await expect(kitchen.getByRole("region",{name:"Corner Deli employee PIN login"})).toBeVisible();
   await expect(kitchen.getByRole("heading",{name:"Corner Deli Kitchen",exact:true})).toHaveCount(0);
