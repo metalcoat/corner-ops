@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import StreetMap, { type MapPoint } from "@/components/street-map";
 import { CAR_COLORS, CAR_TYPES, carLabel, CURBSIDE_CHECK_IN_STATUSES } from "@/lib/curbside-arrival-policy";
+import { orderPaymentState } from "@/lib/order-payment-state";
 import "../order.css";
 
 const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
@@ -84,6 +85,7 @@ function CurbsideCheckIn({ orderId, initial }: { orderId: string; initial: { car
 
 /** Which tracker step the order is on, Domino's-style. */
 function currentStep(order: any, delivery: DeliveryTracker | null) {
+  if (order.held_until_prep || order.waiting_for_open) return 0;
   const kitchen = ["sent_to_kitchen", "in_progress"].includes(order.status) ? 1 : 0;
   if (!isDelivery(order)) {
     if (order.status === "completed") return 3;
@@ -103,6 +105,8 @@ function headline(order: any, delivery: DeliveryTracker | null, step: number) {
     ? ["Your paid order needs a store check", "Your card was charged. The store still needs to send this order to the kitchen. Please don't pay again."]
     : ["Your order has not been placed", "Return to online ordering to finish checkout."];
   if (order.status === "cancelled") return ["Order cancelled", "Call Corner Deli if this is a surprise."];
+  if (order.waiting_for_open) return ["Your order is queued for opening", "We'll start making it when the store opens."];
+  if (order.held_until_prep) return ["Your order is scheduled", "We'll start making it closer to your scheduled time."];
   if (!isDelivery(order))
     return [
       ["We got your order", "It's in line for the kitchen."],
@@ -187,7 +191,23 @@ export default function OrderConfirmation({ orderId }: { orderId: string }) {
     if (delivery.destination) points.push({ id: "home", kind: "home", ...delivery.destination, label: "You" });
     if (data.store) points.push({ id: "store", kind: "store", ...data.store });
   }
-  const due = order.payment_status === "paid" ? 0 : Math.max(0, order.total_cents - order.paid_cents);
+  const refunded = Number(order.refunded_cents || 0);
+  const payment = orderPaymentState({
+    status: String(order.status),
+    paymentStatus: String(order.payment_status),
+    voided: Boolean(order.voided_at),
+    paidCents: Number(order.paid_cents || 0),
+    dueCents: Number(order.amount_due_cents ?? Math.max(0, order.total_cents - order.paid_cents)),
+    refundedCents: refunded,
+  });
+  const due = payment.owes ? Number(order.amount_due_cents ?? Math.max(0, order.total_cents - order.paid_cents)) : 0;
+  const hasRefund = ["refunded", "partially_refunded"].includes(payment.key)
+    || (payment.key === "voided" && (refunded > 0 || ["refunded", "partially_refunded"].includes(order.payment_status)));
+  const paymentLabel = due ? (delivering ? "Due at delivery" : "Due at pickup")
+    : hasRefund ? (Number(order.paid_cents) > 0 ? "Partially refunded" : "Refunded")
+    : payment.key === "voided" ? (Number(order.paid_cents) > 0 ? "Paid before cancellation" : "No payment due")
+    : "Paid";
+  const paymentAmount = due || (hasRefund ? refunded : Number(order.paid_cents || 0));
 
   return (
     <main className="customerOrder confirmationPage">
@@ -211,7 +231,7 @@ export default function OrderConfirmation({ orderId }: { orderId: string }) {
             <small>Approximate location · updated {clock(delivery!.location!.capturedAt)}</small>
           </div>
         )}
-        {order.service_type === "curbside" && CURBSIDE_CHECK_IN_STATUSES.includes(order.status) && (
+        {order.service_type === "curbside" && !order.held_until_prep && !order.waiting_for_open && CURBSIDE_CHECK_IN_STATUSES.includes(order.status) && (
           <CurbsideCheckIn orderId={String(order.id)} initial={data.arrival || null} />
         )}
         <div className="confirmationTiming">
@@ -219,10 +239,10 @@ export default function OrderConfirmation({ orderId }: { orderId: string }) {
           <strong>{order.timing_message_snapshot || (delivering ? "Delivery time confirmed" : "Pickup time confirmed")}</strong>
         </div>
         <p>
-          Thanks, {order.first_name_snapshot}!{" "}
+          {order.status === "cancelled" ? "This order has been cancelled." : <>Thanks, {order.first_name_snapshot}!{" "}
           {order.status === "draft"
             ? order.payment_status === "paid" ? "Your payment was approved. The store is checking your order and will start it shortly." : "Your order hasn't been sent yet."
-            : order.payment_status === "paid" ? "Your payment was approved and your order was sent to Corner Deli." : "Your order was sent to Corner Deli."}
+            : order.payment_status === "paid" ? "Your payment was approved and your order was sent to Corner Deli." : "Your order was sent to Corner Deli."}</>}
         </p>
         <div className="confirmationLines">
           {order.lines.map((line: any, index: number) => (
@@ -253,8 +273,8 @@ export default function OrderConfirmation({ orderId }: { orderId: string }) {
             </div>
           ))}
           <div className="confirmationDue">
-            <span>{due ? (delivering ? "Due at delivery" : "Due at pickup") : "Paid"}</span>
-            <strong>{money(due || order.paid_cents || order.total_cents)}</strong>
+            <span>{paymentLabel}</span>
+            <strong>{money(paymentAmount)}</strong>
           </div>
         </div>
         <p className="confirmationEmail">

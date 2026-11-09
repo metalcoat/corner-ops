@@ -13,8 +13,9 @@ function menuFixture() {
   };
 }
 
-async function setup(page: Page) {
+async function setup(page: Page, customize?: (fixture: ReturnType<typeof menuFixture>) => void) {
   const fixture = menuFixture();
+  customize?.(fixture);
   await page.route("**/api/customer/catalog*", (route) => route.fulfill({ json: fixture }));
   await page.route("**/api/customer/account/cards", (route) => route.fulfill({ json: { cards: [] } }));
   await page.goto("/order");
@@ -41,6 +42,104 @@ test("web quantity and combo estimates match the configuration sent for pricing"
   await page.getByRole("button", { name: "Review order", exact: true }).click();
   await expect.poll(() => submitted?.items?.[0]?.modifierQuantities?.cheese).toBe(2);
   expect(submitted.items[0].comboSelections).toEqual({ drink: ["shake"] });
+});
+
+test("verification rebuilds a guest card review before switching to pay at pickup", async ({ page }) => {
+  const fixture = await setup(page, (menu) => { menu.customer.authenticated = false; });
+  const carts: string[] = [], submitted: string[] = [];
+  await page.route("**/api/customer/cart", async (route) => {
+    const id = `review-${carts.length + 1}`; carts.push(id);
+    await route.fulfill({ status: 201, json: { cart: { id, subtotalCents: 1000, totalCents: 1000, discountCents: 0 } } });
+  });
+  await page.route("**/api/customer/auth/phone", async (route) => {
+    if (route.request().postDataJSON().action === "request") await route.fulfill({ json: { testCode: "654321" } });
+    else { fixture.customer.authenticated = true; await route.fulfill({ json: { authenticated: true } }); }
+  });
+  await page.route("**/api/customer/orders/*/pay-later", async (route) => {
+    submitted.push(route.request().url().split("/").at(-2)!);
+    await route.fulfill({ status: 409, json: { error: "Submission captured" } });
+  });
+  await page.getByRole("dialog", { name: "Test Pizza" }).getByRole("button", { name: "Add to order" }).click();
+  await page.getByRole("button", { name: "Credit or debit", exact: true }).click();
+  await page.getByRole("button", { name: "Review order", exact: true }).click();
+  await expect.poll(() => carts.length).toBe(1);
+  await page.getByRole("button", { name: "Pay at pickup", exact: true }).click();
+  await page.getByRole("button", { name: "Place order — pay at pickup", exact: true }).click();
+  await page.getByRole("button", { name: "TEXT ME A CODE" }).click();
+  await page.getByRole("button", { name: "VERIFY & REVIEW ORDER" }).click();
+  await expect.poll(() => carts.length).toBe(2);
+  expect(submitted).toEqual([]);
+  await page.getByRole("button", { name: "Place order — pay at pickup", exact: true }).click();
+  await expect.poll(() => submitted).toEqual(["review-2"]);
+});
+
+test("a delayed price response cannot restore a review after the contact details change", async ({ page }) => {
+  await setup(page);
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  let started = false;
+  await page.route("**/api/customer/cart", async (route) => {
+    started = true; await pending;
+    await route.fulfill({ status: 201, json: { cart: { id: "stale-review", subtotalCents: 1000, totalCents: 1000, discountCents: 0 } } });
+  });
+  await page.getByRole("dialog", { name: "Test Pizza" }).getByRole("button", { name: "Add to order" }).click();
+  await page.getByRole("button", { name: "Pay at pickup", exact: true }).click();
+  await page.getByRole("button", { name: "Review order", exact: true }).click();
+  await expect.poll(() => started).toBe(true);
+  await page.getByLabel("First name", { exact: true }).fill("Updated");
+  release();
+  await expect(page.getByRole("button", { name: "Review order", exact: true })).toBeEnabled();
+  await expect(page.locator(".serverReview")).toHaveCount(0);
+});
+
+for (const reward of ["loyalty", "points"]) {
+  test(`a delayed ${reward} response cannot restore a discarded review`, async ({ page }) => {
+    await setup(page);
+    await page.route("**/api/customer/cart", (route) => route.fulfill({ status: 201, json: { cart: { id: "old-reward-cart", subtotalCents: 1000, totalCents: 1000, discountCents: 0 } } }));
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    let started = false;
+    await page.route(`**/api/customer/orders/old-reward-cart/${reward}`, async (route) => {
+      started = true; await pending;
+      await route.fulfill({ json: { order: { discount_cents: 800, total_cents: 200 }, redemptions: [] } });
+    });
+    await page.getByRole("dialog", { name: "Test Pizza" }).getByRole("button", { name: "Add to order" }).click();
+    await page.getByRole("button", { name: "Pay at pickup", exact: true }).click();
+    await page.getByRole("button", { name: "Review order", exact: true }).click();
+    await page.getByRole("button", { name: reward === "loyalty" ? "Apply free pizza" : "Use 50 points: Pizza reward", exact: true }).click();
+    await expect.poll(() => started).toBe(true);
+    await page.getByLabel("First name", { exact: true }).fill("Updated");
+    release();
+    await expect(page.getByRole("button", { name: "Review order", exact: true })).toBeEnabled();
+    await expect(page.locator(".serverReview")).toHaveCount(0);
+    await expect(page.getByLabel("Order total")).toContainText("$10.00");
+  });
+}
+
+test("single-choice groups allow extra portions and explain variant prices, included portions and the group fee", async ({ page }) => {
+  await setup(page, (menu) => {
+    menu.categories[0].items[0].modifiers[0].maxSelections = 1;
+    Object.assign(menu.categories[0].items[0].modifiers[0], { includedChoiceCount: 1, selectionChargeCents: 25 });
+  });
+  let submitted: any;
+  await page.route("**/api/customer/cart", async (route) => {
+    submitted = route.request().postDataJSON();
+    await route.fulfill({ status: 201, json: { cart: { id: "portion-review", subtotalCents: 1175, totalCents: 1175, discountCents: 0 } } });
+  });
+  const dialog = page.getByRole("dialog", { name: "Test Pizza" });
+  await expect(dialog.getByRole("button", { name: /Extra cheese/ }).first()).toContainText("$1.50");
+  await expect(dialog).toContainText("$0.25 added once");
+  await dialog.getByRole("button", { name: /Extra cheese/ }).first().click();
+  await expect(dialog.getByRole("button", { name: /Extra cheese/ }).first()).toContainText("Included");
+  await dialog.getByLabel("Extra cheese quantity").getByRole("button", { name: "+", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: /Extra cheese/ }).first()).toContainText("1 included · +$1.50");
+  await dialog.getByRole("button", { name: "Add to order" }).click();
+  await expect(page.getByLabel("Order total")).toContainText("$11.75");
+  await expect(page.locator(".cartLine")).toContainText("2 × Extra cheese");
+  await page.getByRole("button", { name: "Pay at pickup", exact: true }).click();
+  await page.getByRole("button", { name: "Review order", exact: true }).click();
+  await expect.poll(() => submitted?.items?.[0]?.modifierQuantities?.cheese).toBe(2);
+  expect(submitted.items[0].modifierSelections.extras).toEqual(["cheese"]);
 });
 
 test("review exposes pizza and points rewards before a pay-later order is sent", async ({ page }) => {

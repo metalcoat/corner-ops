@@ -7,7 +7,7 @@ import {
 } from "@/lib/customer-ordering-session";
 import { ensureCustomerOrderingSchema } from "@/lib/customer-ordering-schema";
 import { merchandiseAfterDiscounts, quoteDelivery } from "@/lib/ordering-delivery";
-import { getSql } from "@/lib/db";
+import { getSql, withTransaction } from "@/lib/db";
 import { addCustomerAddress } from "@/lib/ordering-customers";
 
 export const runtime = "nodejs";
@@ -72,41 +72,49 @@ export async function POST(
         );
     if (!address) throw new Error("A validated delivery address is required.");
     const route = await routeDeliveryAddress(address);
-    const quote = await quoteDelivery({
-      business: "Corner Deli",
-      distanceMiles: route.distanceMiles,
-      merchandiseSubtotalCents: merchandiseAfterDiscounts(order),
-    });
-    let customerAddressId = saved ? String(saved.id) : null;
-    if (!saved && ownAccount) {
-      customerAddressId = await addCustomerAddress({
+    const { customerAddressId, quote, updated } = await withTransaction(async () => {
+      const tx = getSql();
+      // Routing can take several seconds. Recheck after it finishes, under the
+      // same order lock as checkout, and save the address and its fee together.
+      const current = (await tx`SELECT o.status,o.service_type,o.subtotal_cents,o.discount_cents,o.paid_cents
+        FROM ordering_orders o JOIN ordering_customer_web_carts c ON c.order_id=o.id
+        WHERE o.id=${id} AND c.session_hash=${hash} AND c.replaced_at IS NULL FOR UPDATE OF o`)[0];
+      if (!current || current.status !== "draft" || current.service_type !== "delivery" || Number(current.paid_cents) > 0)
+        throw new Error("This delivery order can no longer be updated.");
+      const quote = await quoteDelivery({
         business: "Corner Deli",
-        customerId: String(order.customer_id),
-        label: String(body.label || "Delivery"),
-        line1: address.line1,
-        line2: String(body.line2 || ""),
-        city: address.city,
-        state: address.state,
-        postalCode: address.postalCode,
-        standardizedAddress: address.formattedAddress,
-        provider: address.provider,
-        providerReferenceId: address.providerReferenceId,
-        latitude: address.latitude,
-        longitude: address.longitude,
-        isPrimary: body.makeDefault === true,
+        distanceMiles: route.distanceMiles,
+        merchandiseSubtotalCents: merchandiseAfterDiscounts(current),
       });
-    }
-    await saveOrderDeliveryAddress({
-      orderId: id,
-      address,
-      line2: saved ? String(saved.line2 || "") : String(body.line2 || ""),
-      customerAddressId,
-      route,
+      let customerAddressId = saved ? String(saved.id) : null;
+      if (!saved && ownAccount) {
+        customerAddressId = await addCustomerAddress({
+          business: "Corner Deli",
+          customerId: String(order.customer_id),
+          label: String(body.label || "Delivery"),
+          line1: address.line1,
+          line2: String(body.line2 || ""),
+          city: address.city,
+          state: address.state,
+          postalCode: address.postalCode,
+          standardizedAddress: address.formattedAddress,
+          provider: address.provider,
+          providerReferenceId: address.providerReferenceId,
+          latitude: address.latitude,
+          longitude: address.longitude,
+          isPrimary: body.makeDefault === true,
+        });
+      }
+      await saveOrderDeliveryAddress({
+        orderId: id,
+        address,
+        line2: saved ? String(saved.line2 || "") : String(body.line2 || ""),
+        customerAddressId,
+        route,
+      });
+      const updated = (await tx`UPDATE ordering_orders SET delivery_fee_cents=${quote.deliveryFeeCents},total_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${quote.deliveryFeeCents}),amount_due_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${quote.deliveryFeeCents}-paid_cents),version=version+1,updated_at=NOW() WHERE id=${id} RETURNING total_cents,amount_due_cents,delivery_fee_cents`)[0];
+      return { customerAddressId, quote, updated };
     });
-    await sql`UPDATE ordering_orders SET delivery_fee_cents=${quote.deliveryFeeCents},total_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${quote.deliveryFeeCents}),amount_due_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${quote.deliveryFeeCents}-paid_cents),version=version+1,updated_at=NOW() WHERE id=${id}`;
-    const updated = (
-      await sql`SELECT total_cents,amount_due_cents,delivery_fee_cents FROM ordering_orders WHERE id=${id}`
-    )[0];
     return isoJson({
       address,
       customerAddressId,

@@ -77,6 +77,7 @@ type ItemRow = {
   quantity: number;
   unit_price_cents: number;
   modifier_total_cents: number;
+  combo_name_snapshot: string;
   combo_total_cents: number;
   line_total_cents: number;
 };
@@ -231,7 +232,7 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
   const sql = getSql();
   const items = (await sql`
     SELECT id, item_id, item_name_snapshot, variant_id, variant_name_snapshot, quantity, COALESCE(cancelled_quantity, 0) AS cancelled_quantity,
-           unit_price_cents, modifier_total_cents, combo_total_cents, line_total_cents, custom_item
+           unit_price_cents, modifier_total_cents, combo_name_snapshot, combo_total_cents, line_total_cents, custom_item
     FROM ordering_order_items
     WHERE order_id = ${order.id}
     ORDER BY sort_order, created_at, id
@@ -302,16 +303,22 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
     }
 
     const snapshots = (await sql`
-      SELECT group_id, option_id, quantity, unit_price_delta_cents, selection_state, pizza_topping_portion, pizza_topping_amount
-      FROM ordering_order_item_modifiers
-      WHERE order_item_id = ${item.id}
+      SELECT snapshot.group_id, snapshot.option_id, snapshot.quantity, snapshot.unit_price_delta_cents,
+             snapshot.selection_state, snapshot.pizza_topping_portion, snapshot.pizza_topping_amount
+      FROM ordering_order_item_modifiers snapshot
+      LEFT JOIN ordering_modifier_options opt ON opt.id=snapshot.option_id
+      WHERE snapshot.order_item_id = ${item.id}
+      ORDER BY opt.sort_order,opt.name,snapshot.unit_price_delta_cents,snapshot.id
     `) as ModifierSnapshot[];
     const includedUnits = new Map<string, number>();
     const declinedGroups = new Set(snapshots.filter((snapshot) => snapshot.selection_state === "declined_included").map((snapshot) => snapshot.group_id));
     const selectedOptions = new Map<string, Set<string>>();
     const groupChargeCarried = new Set<string>();
     const groupChargeNeeded = new Map<string, number>();
+    const currentIncludedUnits = new Map<string, number>();
+    const currentChargedGroups = new Set<string>();
     let modifierTotal = 0;
+    let currentModifierTotal = 0;
     for (const snapshot of snapshots) {
       if (
         snapshot.selection_state !== "selected" &&
@@ -362,25 +369,42 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
               snapshot.pizza_topping_amount,
             )
           : number(option.current_price_cents);
-      const allowedIncluded =
+      // Reprice all selected units in the same menu order as the writer. A fee
+      // can equal a portion's price, so validating rows alone cannot detect a
+      // removed fee or a changed included allowance in every case.
+      if (snapshot.pizza_topping_portion) {
+        currentModifierTotal += currentCharge * quantity;
+      } else {
+        const remainingIncluded = declinedGroups.has(snapshot.group_id) ? 0 : Math.max(0, number(option.included_choice_count) - (currentIncludedUnits.get(snapshot.group_id) || 0));
+        const included = Math.min(remainingIncluded, quantity);
+        currentIncludedUnits.set(snapshot.group_id, (currentIncludedUnits.get(snapshot.group_id) || 0) + included);
+        currentModifierTotal += currentCharge * (quantity - included);
+        if (!currentChargedGroups.has(snapshot.group_id)) {
+          currentModifierTotal += number(option.selection_charge_cents);
+          currentChargedGroups.add(snapshot.group_id);
+        }
+      }
+      const hasIncludedAllowance =
         !declinedGroups.has(snapshot.group_id) &&
         number(option.included_choice_count) > 0 &&
         (includedUnits.get(snapshot.group_id) || 0) + quantity <=
-          number(option.included_choice_count) &&
-        number(snapshot.unit_price_delta_cents) === 0;
-      // A charge-once group fee (Deluxe +$0.25) rides on exactly one selected option of the group.
+          number(option.included_choice_count);
+      // The writer puts the fee on one unit, which may itself be an included
+      // portion. Remove that fee before checking the portion's menu price.
       const groupCharge = number(option.selection_charge_cents);
       const carriesGroupCharge =
         groupCharge > 0 &&
+        quantity === 1 &&
         !groupChargeCarried.has(snapshot.group_id) &&
-        number(snapshot.unit_price_delta_cents) ===
-          (allowedIncluded ? 0 : currentCharge) + groupCharge;
+        (number(snapshot.unit_price_delta_cents) === currentCharge + groupCharge ||
+          (hasIncludedAllowance && number(snapshot.unit_price_delta_cents) === groupCharge));
+      const savedPortionCharge = number(snapshot.unit_price_delta_cents) - (carriesGroupCharge ? groupCharge : 0);
+      const allowedIncluded = hasIncludedAllowance && savedPortionCharge === 0;
       if (carriesGroupCharge) groupChargeCarried.add(snapshot.group_id);
       else if (groupCharge > 0) groupChargeNeeded.set(snapshot.group_id, groupCharge);
       if (
-        currentCharge !== number(snapshot.unit_price_delta_cents) &&
-        !allowedIncluded &&
-        !carriesGroupCharge
+        currentCharge !== savedPortionCharge &&
+        !allowedIncluded
       ) {
         throw new OrderConflictError(
           `A modifier price on ${item.item_name_snapshot} changed. Review and rebuild the order before submitting.`,
@@ -436,15 +460,62 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
         );
       }
     }
-    if (modifierTotal !== number(item.modifier_total_cents)) {
+    if (modifierTotal !== number(item.modifier_total_cents) || currentModifierTotal !== modifierTotal) {
       throw new OrderConflictError(
         `Modifier pricing changed for ${item.item_name_snapshot}. Review and rebuild the order before submitting.`,
       );
     }
 
+    const comboSelections = await sql`
+      SELECT combo_id, group_id, option_id, price_delta_cents
+      FROM ordering_order_item_combo_selections WHERE order_item_id=${item.id}
+    `;
+    let comboTotal = 0;
+    if (item.combo_name_snapshot || comboSelections.length) {
+      // A combo with optional choices can have no selection rows. Older order
+      // lines store its name, so resolve that unique business/name in that case.
+      const selectedComboId = comboSelections[0]?.combo_id || null;
+      const [combo] = await sql`
+        SELECT combo.id, combo.base_price_delta_cents
+        FROM ordering_menu_item_combos link
+        JOIN ordering_combo_definitions combo ON combo.id=link.combo_id AND combo.active=TRUE
+        WHERE link.item_id=${item.item_id} AND link.active=TRUE AND combo.business=${order.business}
+          AND ((${selectedComboId}::uuid IS NOT NULL AND combo.id=${selectedComboId}::uuid)
+            OR (${selectedComboId}::uuid IS NULL AND combo.name=${item.combo_name_snapshot}))
+        LIMIT 1
+      `;
+      if (!combo) throw new OrderConflictError(`The combo on ${item.item_name_snapshot} is no longer available. Review and rebuild the order before submitting.`);
+      comboTotal = number(combo.base_price_delta_cents);
+      const comboGroups = await sql`SELECT id,name,min_selections,max_selections FROM ordering_combo_groups WHERE combo_id=${combo.id} AND active=TRUE`;
+      const comboOptions = await sql`
+        SELECT opt.id,opt.group_id,opt.price_delta_cents,opt.available
+        FROM ordering_combo_options opt JOIN ordering_combo_groups grp ON grp.id=opt.group_id AND grp.active=TRUE
+        WHERE grp.combo_id=${combo.id} AND opt.active=TRUE
+      `;
+      for (const selected of comboSelections) {
+        const currentOption = comboOptions.find((option) => option.id === selected.option_id && option.group_id === selected.group_id);
+        if (selected.combo_id !== combo.id || !currentOption?.available) {
+          throw new OrderConflictError(`A combo choice on ${item.item_name_snapshot} is no longer available. Review and rebuild the order before submitting.`);
+        }
+        if (number(currentOption.price_delta_cents) !== number(selected.price_delta_cents)) {
+          throw new OrderConflictError(`A combo price on ${item.item_name_snapshot} changed. Review and rebuild the order before submitting.`);
+        }
+        comboTotal += number(currentOption.price_delta_cents);
+      }
+      for (const group of comboGroups) {
+        const count = comboSelections.filter((selected) => selected.group_id === group.id).length;
+        if (count < number(group.min_selections) || count > number(group.max_selections)) {
+          throw new OrderConflictError(`Required combo choices changed for ${item.item_name_snapshot}: ${group.name}. Review the order before submitting.`);
+        }
+      }
+    }
+    if (comboTotal !== number(item.combo_total_cents)) {
+      throw new OrderConflictError(`Combo pricing changed for ${item.item_name_snapshot}. Review and rebuild the order before submitting.`);
+    }
+
     const lineTotal =
       number(item.quantity) *
-      (currentBase + modifierTotal + number(item.combo_total_cents));
+      (currentBase + modifierTotal + comboTotal);
     if (lineTotal !== number(item.line_total_cents)) {
       throw new OrderConflictError(
         `The total for ${item.item_name_snapshot} changed. Review and rebuild the order before submitting.`,
@@ -590,6 +661,13 @@ async function runDraftSubmit(
       await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)VALUES(${randomUUID()},${orderId},${restored[0].version},'order_reopen_closed_no_changes',${actor.type},${actor.id},${JSON.stringify({restoredStatus:priorStatus,reason:"payment_only",actorName:actor.name})}::jsonb)`;
       return { order: restored[0], alreadySubmitted: false, kitchenTicketCreated: false };
     }
+    const websiteOrder = String(order.source || "").toLowerCase() === "web";
+    if (websiteOrder && !reopenDetails && order.timing_mode === "future") {
+      const scheduledTime = order.scheduled_for ? new Date(order.scheduled_for).getTime() : NaN;
+      if (!Number.isFinite(scheduledTime) || scheduledTime <= Date.now()) {
+        throw new OrderConflictError("The scheduled pickup or delivery time has passed. Choose a new future time and review the order before submitting.");
+      }
+    }
     const availabilityAt =
       order.timing_mode === "future" && order.scheduled_for
         ? new Date(order.scheduled_for)
@@ -604,7 +682,6 @@ async function runDraftSubmit(
     });
     // Staff channels may send when no hours are set up yet; the website may
     // not (no hours set up means closed online).
-    const websiteOrder = String(order.source || "").toLowerCase() === "web";
     if ((availability.sourceRule !== "unconfigured" || websiteOrder) && !availability.orderable) {
       const reason = String(override?.reason || "").trim();
       if (!override?.approved || !canManagePos(actor) || !reason) {

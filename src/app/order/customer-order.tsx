@@ -210,14 +210,16 @@ function cartDetails(line: CartLine) {
         (option) =>
           selectedIds.has(option.id) &&
           (!option.defaultSelected ||
-            (line.modifierAmounts[option.id] || "normal") !== "normal"),
+            (line.modifierAmounts[option.id] || "normal") !== "normal" ||
+            (line.modifierSelections[group.id] || []).filter((id) => id === option.id).length > 1),
       )
-      .map((option) =>
-        formatModifierIntensity(
+      .map((option) => {
+        const count = (line.modifierSelections[group.id] || []).filter((id) => id === option.id).length;
+        return `${count > 1 ? `${count} × ` : ""}${formatModifierIntensity(
           option.name,
           line.modifierAmounts[option.id] || "normal",
-        ),
-      );
+        )}`;
+      });
     if (names.length) details.push(`${group.name}: ${names.join(", ")}`);
   }
   for (const topping of line.pizzaToppings) {
@@ -304,6 +306,7 @@ export default function CustomerOrder() {
     [busy, setBusy] = useState(false),
     [savedCards, setSavedCards] = useState<Array<{ id: string; brand: string; last4: string; expMonth: number | null; expYear: number | null }>>([]);
   const signedIn = Boolean(catalog?.customer.authenticated || phoneVerified);
+  const priceRevision = useRef(0);
   // Cards the signed-in customer saved at MX ("Visa ····1111"); only MX's token is kept.
   useEffect(() => {
     if (!signedIn) { setSavedCards([]); return; }
@@ -318,10 +321,11 @@ export default function CustomerOrder() {
   // The priced review is a server draft built from these choices; once any of
   // them changes, Place order must price a new draft instead of paying the old one.
   useEffect(() => {
+    priceRevision.current += 1;
     setReview(null);
     setRewardApplied(false);
     setPointsUsed([]);
-  }, [serviceType, timing, scheduledFor, firstName, lastName, phone, email, deliveryAddress, deliveryUnit, deliveryInstructions]);
+  }, [cart, serviceType, timing, scheduledFor, firstName, lastName, phone, email, deliveryAddress, deliveryUnit, deliveryInstructions]);
   const selectedDeliveryLocation = DELIVERY_LOCATION_PRESETS.find(
     (location) => location.id === selectedDeliveryLocationId,
   );
@@ -373,7 +377,12 @@ export default function CustomerOrder() {
       { cache: "no-store", signal: controller.signal },
     )
       .then((r) => r.json())
-      .then((body) => { if (!controller.signal.aborted) setSlots(body.slots || []); })
+      .then((body) => {
+        if (controller.signal.aborted) return;
+        setSlots(body.slots || []);
+        if (body.error) setMessage(body.error);
+        setScheduledFor((current) => (body.slots || []).includes(current) ? current : "");
+      })
       .catch(() => { if (!controller.signal.aborted) setSlots([]); });
     return () => controller.abort();
   }, [date, serviceType, timing]);
@@ -556,6 +565,7 @@ export default function CustomerOrder() {
     setReview(null);
   }
   async function price() {
+    const revision = priceRevision.current;
     setBusy(true);
     setMessage("");
     try {
@@ -585,7 +595,7 @@ export default function CustomerOrder() {
             itemId: line.item.id,
             variantId: line.variantId,
             quantity: line.quantity,
-            modifierSelections: line.modifierSelections,
+            modifierSelections: Object.fromEntries(Object.entries(line.modifierSelections).map(([group, ids]) => [group, [...new Set(ids)]])),
             modifierQuantities: Object.values(line.modifierSelections).flat().reduce<Record<string, number>>((counts, id) => { counts[id] = (counts[id] || 0) + 1; return counts; }, {}),
             modifierDeclines: line.modifierDeclines,
             modifierAmounts: line.modifierAmounts,
@@ -598,6 +608,7 @@ export default function CustomerOrder() {
       });
       if (!response.ok) throw new Error(await failure(response));
       let priced = (await response.json()).cart;
+      if (revision !== priceRevision.current) return null;
       if (serviceType === "delivery") {
         const attachedResponse = await fetch(
           `/api/customer/orders/${encodeURIComponent(priced.id)}/delivery`,
@@ -617,6 +628,7 @@ export default function CustomerOrder() {
         if (!attachedResponse.ok)
           throw new Error(await failure(attachedResponse));
         const attached = await attachedResponse.json();
+        if (revision !== priceRevision.current) return null;
         setValidatedDelivery(attached.address);
         if (attached.customerAddressId)
           setSavedAddressId(attached.customerAddressId);
@@ -632,6 +644,7 @@ export default function CustomerOrder() {
       setPointsUsed([]);
       return priced;
     } catch (e) {
+      if (revision !== priceRevision.current) return null;
       setMessage(e instanceof Error ? e.message : "Could not price the order.");
       return null;
     } finally {
@@ -683,7 +696,12 @@ export default function CustomerOrder() {
       setPhoneVerifySent(false);
       setPhoneVerifyCode("");
       setBusy(false);
-      await completePlaceOrder();
+      // Verification rotates the session. The guest's reviewed draft belongs
+      // to the old session, so rebuild the review before placing this order.
+      setReview(null);
+      setRewardApplied(false);
+      setPointsUsed([]);
+      await price();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Phone verification failed.");
     } finally {
@@ -692,6 +710,8 @@ export default function CustomerOrder() {
   }
   async function applyLoyaltyReward(programId: string) {
     if (!review?.id || busy) return;
+    const revision = priceRevision.current;
+    const orderId = review.id;
     setBusy(true);
     setMessage("");
     try {
@@ -705,13 +725,15 @@ export default function CustomerOrder() {
       );
       if (!response.ok) throw new Error(await failure(response));
       const result = await response.json();
-      setReview((current: any) => ({
+      if (revision !== priceRevision.current) return;
+      setReview((current: any) => current?.id !== orderId ? current : ({
         ...current,
         discountCents: Number(result.order.discount_cents),
         totalCents: Number(result.order.total_cents),
       }));
       setRewardApplied(true);
     } catch (error) {
+      if (revision !== priceRevision.current) return;
       setMessage(
         error instanceof Error ? error.message : "Reward could not be applied.",
       );
@@ -721,6 +743,8 @@ export default function CustomerOrder() {
   }
   async function changePoints(method: "POST" | "DELETE", body: Record<string, string>) {
     if (!review?.id || busy) return;
+    const revision = priceRevision.current;
+    const orderId = review.id;
     setBusy(true);
     setMessage("");
     try {
@@ -730,13 +754,15 @@ export default function CustomerOrder() {
       );
       if (!response.ok) throw new Error(await failure(response));
       const result = await response.json();
-      setReview((current: any) => ({
+      if (revision !== priceRevision.current) return;
+      setReview((current: any) => current?.id !== orderId ? current : ({
         ...current,
         discountCents: Number(result.order.discount_cents),
         totalCents: Number(result.order.total_cents),
       }));
       setPointsUsed(result.redemptions || []);
     } catch (error) {
+      if (revision !== priceRevision.current) return;
       setMessage(error instanceof Error ? error.message : "Points could not be used.");
     } finally {
       setBusy(false);
@@ -973,7 +999,7 @@ export default function CustomerOrder() {
           Account
         </a>
       </header>
-      {phoneVerifyOpen&&<div className="fulfillmentModal open phoneVerifyModal"><section role="dialog" aria-modal="true" aria-label="Verify mobile number"><header><div><p className="eyebrow">One quick step</p><h2>Verify your phone</h2></div><button onClick={()=>setPhoneVerifyOpen(false)} aria-label="Close">×</button></header><p>We’ll text a six-digit code to <strong>{phone}</strong>. This confirms we can reach you if there is a question about your order.</p>{message&&<p className="orderError" role="alert">{message}</p>}{phoneTestCode&&<p className="phoneTestCode" role="status"><strong>Test mode:</strong> no text was sent. Your code is <b>{phoneTestCode}</b> (filled in for you).</p>}{phoneVerifySent&&<input className="phoneVerifyInput" inputMode="numeric" autoComplete="one-time-code" aria-label="SMS verification code" placeholder="6-digit code" maxLength={6} value={phoneVerifyCode} onChange={event=>setPhoneVerifyCode(event.target.value.replace(/\D/g,""))}/>}<button className="reviewButton" disabled={busy||phone.replace(/\D/g,"").length!==10||(phoneVerifySent&&phoneVerifyCode.length!==6)} onClick={()=>void verifyOrderPhone()}>{busy?"Please wait…":phoneVerifySent?"VERIFY & PLACE ORDER":"TEXT ME A CODE"}</button>{phoneVerifySent&&<button className="accountLink" onClick={()=>{setPhoneVerifyOpen(false);setPhoneVerifySent(false);setPhoneVerifyCode("")}}>Change phone number</button>}</section></div>}
+      {phoneVerifyOpen&&<div className="fulfillmentModal open phoneVerifyModal"><section role="dialog" aria-modal="true" aria-label="Verify mobile number"><header><div><p className="eyebrow">One quick step</p><h2>Verify your phone</h2></div><button onClick={()=>setPhoneVerifyOpen(false)} aria-label="Close">×</button></header><p>We’ll text a six-digit code to <strong>{phone}</strong>. This confirms we can reach you if there is a question about your order.</p>{message&&<p className="orderError" role="alert">{message}</p>}{phoneTestCode&&<p className="phoneTestCode" role="status"><strong>Test mode:</strong> no text was sent. Your code is <b>{phoneTestCode}</b> (filled in for you).</p>}{phoneVerifySent&&<input className="phoneVerifyInput" inputMode="numeric" autoComplete="one-time-code" aria-label="SMS verification code" placeholder="6-digit code" maxLength={6} value={phoneVerifyCode} onChange={event=>setPhoneVerifyCode(event.target.value.replace(/\D/g,""))}/>}<button className="reviewButton" disabled={busy||phone.replace(/\D/g,"").length!==10||(phoneVerifySent&&phoneVerifyCode.length!==6)} onClick={()=>void verifyOrderPhone()}>{busy?"Please wait…":phoneVerifySent?"VERIFY & REVIEW ORDER":"TEXT ME A CODE"}</button>{phoneVerifySent&&<button className="accountLink" onClick={()=>{setPhoneVerifyOpen(false);setPhoneVerifySent(false);setPhoneVerifyCode("")}}>Change phone number</button>}</section></div>}
       <div className="fulfillmentDock">
         <button className="fulfillmentSummary" onClick={()=>{setSetupVisited(true);setFulfillmentOpen(true)}}><span className="fulfillmentBag" aria-hidden="true">⌄</span><strong>{serviceType==="delivery"?"Delivery":serviceType==="curbside"?"Curbside pickup":"In-store pickup"}</strong><span>{timing==="asap"?(catalog&&!catalog.availability.open?"ASAP preorder":"ASAP"):scheduledFor?new Date(scheduledFor).toLocaleString([],{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}):"Choose future time"}{serviceType==="delivery"&&validatedDelivery?` · ${validatedDelivery.formattedAddress}`:""}</span><em>Change ›</em></button>
       </div>
@@ -1772,7 +1798,7 @@ function ItemDialog({
           ? values.filter((v) => v !== id)
           : group.maxSelections === 1
             ? [id]
-            : values.length < group.maxSelections
+            : new Set(values).size < group.maxSelections
               ? [...values, id]
               : values;
       return { ...current, [group.id]: next };
@@ -1781,7 +1807,7 @@ function ItemDialog({
     setSelected((current) => {
       const values = current[group.id] || [],
         count = values.filter((value) => value === id).length;
-      if (delta > 0 && values.length < group.maxSelections)
+      if (delta > 0 && count < 99 && (count > 0 || new Set(values).size < group.maxSelections))
         return { ...current, [group.id]: [...values, id] };
       if (delta < 0 && count > 0) {
         const index = values.lastIndexOf(id);
@@ -1809,10 +1835,9 @@ function ItemDialog({
           ? current[group.id]
           : group.maxSelections === 1
             ? [option.id]
-            : [...(current[group.id] || []), option.id].slice(
-                0,
-                group.maxSelections,
-              ),
+            : new Set(current[group.id] || []).size < group.maxSelections
+              ? [...(current[group.id] || []), option.id]
+              : current[group.id] || [],
       }));
       setIntensityChoice({ group, option });
     }, 450);
@@ -1834,8 +1859,8 @@ function ItemDialog({
       .filter((g) => g.presentationBehavior !== "pizza_topping")
       .every(
         (g) =>
-          (selected[g.id]?.length || 0) >= g.minSelections &&
-          (selected[g.id]?.length || 0) <= g.maxSelections,
+          new Set(selected[g.id] || []).size >= g.minSelections &&
+          new Set(selected[g.id] || []).size <= g.maxSelections,
       ) &&
     (!availableVariants.length || variantId) &&
     (!comboId ||
@@ -1900,6 +1925,8 @@ function ItemDialog({
                 {group.prompt || group.name}{" "}
                 {group.minSelections > 0 && <em>Required</em>}
               </legend>
+              {Boolean(group.includedChoiceCount) && <p>First {group.includedChoiceCount} {group.includedChoiceCount === 1 ? "portion is" : "portions are"} included. Extra portions are charged.</p>}
+              {Boolean(group.selectionChargeCents) && <p>{money(group.selectionChargeCents!)} added once when you choose from this group.</p>}
               {group.options
                 .filter((o) => o.available)
                 .map((option) => {
@@ -1913,6 +1940,9 @@ function ItemDialog({
                     Boolean(group.supportsIntensity),
                     option.name,
                   );
+                  const optionPrice = availableVariants.find((variant) => variant.id === variantId)?.modifierPrices.find((price) => price.optionId === option.id)?.priceDeltaCents ?? option.priceDeltaCents;
+                  const earlierUnits = group.options.slice(0, group.options.indexOf(option)).reduce((sum, earlier) => sum + (selected[group.id] || []).filter((id) => id === earlier.id).length, 0);
+                  const included = Math.min(optionQuantity, Math.max(0, (group.includedChoiceCount || 0) - earlierUnits));
                   return (
                     <div className="customerModifierChoice" key={option.id}>
                       <button
@@ -1939,9 +1969,7 @@ function ItemDialog({
                         <span>{isSelected ? "✓" : ""}</span>
                         <strong>{option.name}</strong>
                         <b>
-                          {option.priceDeltaCents
-                            ? `+${money(option.priceDeltaCents)}`
-                            : ""}
+                          {included && included === optionQuantity ? "Included" : included ? `${included} included · +${money(optionPrice * (optionQuantity - included))}` : optionPrice ? `+${money(optionPrice)}` : ""}
                         </b>
                       </button>
                       {isSelected && supportsIntensity && (

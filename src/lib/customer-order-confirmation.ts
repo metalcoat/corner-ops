@@ -3,6 +3,7 @@ import { ensureCustomerOrderingSchema } from "@/lib/customer-ordering-schema";
 import { sendTransactionalEmail } from "@/lib/transactional-email";
 import { orderReceiptBreakdown } from "@/lib/ordering-sales-tax";
 import { receiptBreakdownRows } from "@/lib/receipt-tax";
+import { waitingForOpening } from "@/lib/customer-order-progress";
 
 const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
@@ -12,9 +13,13 @@ export async function customerOrderConfirmation(orderId: string): Promise<any> {
   const order = (
     await sql`
     SELECT id,display_number,status,payment_status,service_type,timing_mode,
-      scheduled_for,timing_message_snapshot,first_name_snapshot,last_name_snapshot,
+      scheduled_for,promised_at,quoted_lead_max_minutes,timing_message_snapshot,first_name_snapshot,last_name_snapshot,
       phone_snapshot,email_snapshot,subtotal_cents,discount_cents,tax_cents,
-      tip_cents,delivery_fee_cents,total_cents,paid_cents,created_at,confirmation_email_sent_at
+      tip_cents,delivery_fee_cents,total_cents,paid_cents,amount_due_cents,voided_at,
+      kitchen_release_at,COALESCE(status='sent_to_kitchen' AND kitchen_release_at>NOW(),FALSE) held_until_prep,
+      created_at,confirmation_email_sent_at,
+      (SELECT COALESCE(SUM(payment.amount_cents),0)::int FROM ordering_payment_transactions payment
+        WHERE payment.order_id=ordering_orders.id AND payment.transaction_type IN ('void','refund') AND payment.status='approved') refunded_cents
     FROM ordering_orders WHERE id=${orderId} AND business='Corner Deli' AND source='web' LIMIT 1
   `
   )[0] as Record<string, any> | undefined;
@@ -27,6 +32,10 @@ export async function customerOrderConfirmation(orderId: string): Promise<any> {
   const receipt = await orderReceiptBreakdown(orderId);
   return {
     ...order,
+    waiting_for_open: waitingForOpening({
+      status: String(order.status), timing_mode: order.timing_mode,
+      promised_at: order.promised_at, quoted_lead_max_minutes: order.quoted_lead_max_minutes,
+    }),
     receipt,
     receipt_rows: receiptBreakdownRows(receipt),
     sales_tax_included_cents: receipt.taxCents,
@@ -42,6 +51,8 @@ export async function customerOrderConfirmation(orderId: string): Promise<any> {
     tip_cents: Number(order.tip_cents),
     total_cents: Number(order.total_cents),
     paid_cents: Number(order.paid_cents),
+    amount_due_cents: Number(order.amount_due_cents),
+    refunded_cents: Number(order.refunded_cents),
     lines: lines.map((line) => ({
       ...line,
       quantity: Number(line.quantity),

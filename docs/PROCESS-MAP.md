@@ -744,11 +744,24 @@ flowchart LR
 - Web and kiosk customers review the server-priced order before placing it, so they can apply pizza and points
   rewards before payment. The selected fulfillment time controls menu availability. Estimates include size prices,
   modifier quantities, included portions and combo surcharges; the server remains authoritative.
+  On the website, changing items, contact, service, time or delivery details invalidates the review; an older
+  pricing, delivery or reward response cannot restore it. Guest phone verification rotates the session and
+  rebuilds the review under the signed-in session before the customer places the order.
 - Included modifiers are counted by portion: one included dressing plus extra portions charges for the extras.
   Size-specific prices are resolved before allowances, and kitchen submission rechecks the saved choices and prices.
+  A group selection fee is charged once even when carried by an included portion. Preflight and submission
+  recompute the group's current total and recheck combo availability, option prices, group requirements and base
+  surcharge; a changed menu requires another review before payment. The website counts distinct choices toward
+  group limits while retaining portion quantities and showing included portions, size prices and group fees.
   Changing the amount of a topping on one pizza half preserves the other half. Tiki tabs and employee meals
   use the same size/allowance calculation; employee meal consumption and kitchen submission commit together,
   and inventory is depleted once.
+- Future website slots use each service's scheduling enablement, normal minimum prep lead and rolling booking
+  horizon, including separate curbside settings. Invalid calendar dates are rejected; out-of-range dates return
+  an explanation and no slots. Timezone-aware dates and checkout's timing quote filter the final allowed day
+  across daylight-saving changes. A first submission of a web order whose selected time has passed fails before
+  charging or sending; staff reopening an already-sent order keeps its existing behavior. Unconfigured hours
+  block web submission. Slot capacity limits are not implemented.
 - Employee drinks at cost (dev, 2026-11-06): 🥤 in the deli toolbar (DRINK in the shared POS bar) for the signed-in PIN
   employee. Only the "12 - 20 oz Soda" and "2 Liter" categories. Price = (cost + bottle deposit) × (1 + tax), rounded up
   to the next $0.25 (20 oz $1.29 → $1.50, 2 L $2.00 → $2.25; `ordering-employee-drink-rules.ts`); costs in `ordering_employee_drink_prices` (migration 0043),
@@ -761,6 +774,28 @@ flowchart LR
   on customer retries. Changed-total reversals are claimed once; failed or interrupted reversals remain flagged
   for staff review. The POS keeps a warning visible, blocks replacement payments, and links managers to
   Settings → Hardware to verify an actual MX void/full refund before clearing the review. A fully rewarded $0 order goes through the same submission checks without a card charge.
+  Before issuing another card token, checkout reconciles unresolved attempts across that browser session's
+  carts, including replaced carts and superseded or unconfirmed-declined attempts, without an age/count cutoff.
+  MX Approved and Settled are charges; confirmed declines with a reference and exact full reversals close the attempt. Pending,
+  unknown, partially refunded or mismatched charges, failed lookups, or unfinished recovery block another payment.
+  Lookups run at most four at a time with a deadline. Replaced carts cannot start another payment; a late approval
+  can still be confirmed so its unrecorded charge is reversed or flagged. The active cart and balance are checked
+  again under locks before a checkout session is created. Initialize, confirm and saved-card completion finish
+  every approval found before returning success, including attempts on an already-paid order. If an old browser
+  tab approves a second token after its local expiry, one tender and kitchen submission remain and the extra
+  charge is reversed once. Lookup or reversal uncertainty returns 409 (with `paymentRecorded` if already paid)
+  and never issues another token; a decline without a processor reference also remains unresolved.
+- A delivery route result is saved only after rechecking the current cart, draft status, delivery service and
+  unpaid balance under the order lock. Address-book changes, the order address and its newly quoted fee commit
+  together; a slow address lookup cannot overwrite an order that was paid or submitted while it ran.
+- Customer confirmation reads the kitchen prep hold and approved refund totals. Scheduled orders remain at
+  **Order placed** until prep release. ASAP preorders still print immediately by store policy, but the customer
+  sees **queued for opening** until the quoted opening (promised time minus quoted lead). This is separate from
+  the scheduled kitchen hold; actual **in progress** or **ready** status takes precedence. Curbside check-in is
+  hidden and rejected by the API while waiting for that opening or a scheduled prep hold. Ordinary ASAP orders
+  and delayed pickups remain eligible. Refunds and cancelled orders do not request that money again; partial
+  refunds show the amount returned, and later repayment restores **Paid**. A paid draft still shows the store-check
+  warning until staff resolve submission.
 - Pizza punches and points accrue only on fully paid purchases. A pay-later order earns when its final payment is
   recorded. Customer and order locks prevent simultaneous reward redemptions from spending the same balance;
   discounts reserve the affected item quantities so promotions and other rewards cannot discount them again.
@@ -782,6 +817,13 @@ flowchart LR
   `ordering_store_locations` (migration 0039). No request handler creates the table.
 - Regression commands and coverage are recorded in [the 2026-11-06 ordering audit](reviews/2026-11-06-ordering-audit.md).
   CI runs the checkout, loyalty and pizza abuse regressions against a disposable database and sanitized menu fixture.
+  The online launch follow-up adds checkout-start/recovery and scheduled-slot checks to
+  `test:customer-checkout:regressions`, modifier-fee/combo checks to `test:pizza-pricing:regressions`, and confirmation
+  hold/refund plus customer interaction checks to `test:ordering-audit:e2e`. These development checks do not verify
+  production routing, live providers or physical printers; the remaining launch steps are in [online-ordering.md](online-ordering.md).
+  The [November 8 launch review](reviews/2026-11-08-online-ordering-launch-review.md) records the second walkthrough,
+  payment-recovery fixes, real sandbox purchases and final build/browser verification. Its opt-in
+  `test:customer-online:sandbox` command requires a disposable database, disabled printers/messages and a separate local app.
 
 ## 9. Guardrails for assistants
 
