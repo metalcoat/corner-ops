@@ -85,3 +85,8 @@ html:has(.checklistScreen),body:has(.checklistScreen){background:#0d1310}
   .ckCase{grid-column:2;grid-row:1;position:sticky;top:16px;max-height:calc(100dvh - 32px);overflow:auto}
   .ckCase h2{display:block}.checklistScreen .ckCaseToggle{display:none}.ckCase.folded .ckCaseBody{display:block}
 }
+.ckCountGrid{width:100%;border-collapse:separate;border-spacing:8px 8px;margin:-8px}
+.ckCountGrid thead th{font-size:.9em;color:var(--ck-muted);text-align:left;padding-left:4px}
+.ckCountGrid tbody th{text-align:left;font-size:1.15em;padding-right:6px;white-space:nowrap}
+.ckCountGrid input{width:100%;min-height:64px;padding:6px 12px;border-radius:12px;border:2px solid #4b5f51;background:#0f1611;color:#fff;font:inherit;font-size:1.7em;font-weight:900;font-variant-numeric:tabular-nums}
+.ckCountGrid input::placeholder{color:#4b5f51}

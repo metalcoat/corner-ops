@@ -4,7 +4,7 @@ import { BUSINESS_DAY_START_HOUR, STORE_TIME_ZONE } from "./business-day";
 
 /** After a PIN, the screen stays on that person this long since their last tap, so they can tick several in a row. */
 export const CHECKLIST_WORKER_IDLE_MS = 3 * 60 * 1000;
-export const CHECKLIST_LIMITS = { lists: 12, itemsPerList: 60, salads: 40, fryers: 12, labelChars: 80, noteChars: 200, sizeChars: 40, reasonChars: 120, howToChars: 600, countFields: 3, countLabelChars: 24, countMax: 99999 };
+export const CHECKLIST_LIMITS = { lists: 12, itemsPerList: 60, salads: 40, fryers: 12, labelChars: 80, noteChars: 200, sizeChars: 40, reasonChars: 120, howToChars: 600, countFields: 12, countLabelChars: 40, countMax: 99999 };
 
 export type ChecklistWorker = { employeeId: string; name: string; role: "employee" | "manager" | "owner"; expiresAt: number };
 
@@ -95,13 +95,22 @@ export function parseCountFields(value: unknown): string[] {
   return fields;
 }
 
-/** The numbers typed for a count job: every field, whole numbers 0 … 99,999. */
+/** Count fields can be a grid, one row per size: "Small · On hand", "Small · Made today", "Jumbo · On hand"… */
+export const COUNT_SIZE_SEPARATOR = " · ";
+export function splitCountField(field: string): { size: string; column: string } {
+  const at = field.indexOf(COUNT_SIZE_SEPARATOR);
+  return at < 0 ? { size: "", column: field } : { size: field.slice(0, at), column: field.slice(at + COUNT_SIZE_SEPARATOR.length) };
+}
+const isMade = (field: string) => /^made\b/i.test(splitCountField(field).column);
+
+/** The numbers typed for a count job: whole numbers 0 … 99,999. "On hand" is required; a blank "Made …" is 0. */
 export function parseCounts(fields: string[], value: unknown): Record<string, number> {
   const input = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const counts: Record<string, number> = {};
   for (const field of fields) {
     const raw = input[field];
-    const number = typeof raw === "number" ? raw : raw === undefined || raw === null || String(raw).trim() === "" ? Number.NaN : Number(String(raw).trim());
+    const blank = raw === undefined || raw === null || String(raw).trim() === "";
+    const number = blank && isMade(field) ? 0 : typeof raw === "number" ? raw : blank ? Number.NaN : Number(String(raw).trim());
     if (!Number.isInteger(number) || number < 0 || number > CHECKLIST_LIMITS.countMax) throw new Error(`Enter a whole number for “${field}”.`);
     counts[field] = number;
   }
@@ -169,25 +178,43 @@ export function tallyByEmployee(checks: Array<{ employeeName: string; undoneAt: 
 export type CountRow = { key: string; label: string; cells: Array<{ list: string; onHand: number | null; by: string | null }>; made: number };
 
 /**
- * The counted things (sub rolls, buns, dough…) for one day: the first number of each list's count ("On hand") in
- * list order, so start / shift change / close read across, and everything entered as "Made …" added up.
+ * The counted things (sub rolls, buns, dough by size…) for one day: each list's "On hand" in list order, so start /
+ * shift change / close read across, and everything entered as "Made …" added up. A grid count gives one row per
+ * size; numbers saved before a job became a grid (plain "On hand") still show, as their own row.
  */
 export function summarizeCounts(lists: Array<{ id: string; name: string; position: number }>, items: HistoryItem[], checks: HistoryCheck[]): CountRow[] {
   const counted = items.filter((item) => item.countFields?.length);
   const keyOf = (item: HistoryItem) => item.countKey || item.label.toLowerCase();
   const order = [...lists].sort((a, b) => a.position - b.position);
-  const rows = new Map<string, CountRow>();
-  for (const item of [...counted].sort((a, b) => (order.findIndex((list) => list.id === a.checklistId) - order.findIndex((list) => list.id === b.checklistId)) || a.position - b.position)) {
-    const key = keyOf(item);
-    if (!rows.has(key)) rows.set(key, { key, label: item.label.replace(/\s+count$/i, ""), cells: [], made: 0 });
-    const row = rows.get(key)!;
-    const list = order.find((entry) => entry.id === item.checklistId);
+  const sorted = [...counted].sort((a, b) => (order.findIndex((list) => list.id === a.checklistId) - order.findIndex((list) => list.id === b.checklistId)) || a.position - b.position);
+  const rows = new Map<string, CountRow & { lists: string[] }>();
+  const sizesOf = (fields: string[]) => [...new Set(fields.map((field) => splitCountField(field).size))];
+  // Rows first (every size any list asks for, and any size found in what was saved), so a missing count shows as a gap.
+  for (const item of sorted) {
     const check = checks.find((entry) => entry.itemId === item.id && !entry.undoneAt);
-    const first = item.countFields![0];
-    row.cells.push({ list: list?.name || "", onHand: check?.counts && first in check.counts ? check.counts[first] : null, by: check?.employeeName || null });
-    for (const [field, value] of Object.entries(check?.counts || {})) if (/^made\b/i.test(field)) row.made += value;
+    const base = item.label.replace(/\s+count$/i, "");
+    for (const size of sizesOf([...item.countFields!, ...Object.keys(check?.counts || {})])) {
+      const key = size ? `${keyOf(item)}:${size}` : keyOf(item);
+      if (!rows.has(key)) rows.set(key, { key, label: size ? `${base} – ${size}` : base, cells: [], made: 0, lists: [] });
+    }
   }
-  return [...rows.values()];
+  for (const item of sorted) {
+    const list = order.find((entry) => entry.id === item.checklistId)?.name || "";
+    const check = checks.find((entry) => entry.itemId === item.id && !entry.undoneAt);
+    for (const row of rows.values()) {
+      if (!row.key.startsWith(keyOf(item)) || (row.key !== keyOf(item) && !row.key.startsWith(`${keyOf(item)}:`)) || row.lists.includes(list)) continue;
+      const size = row.key === keyOf(item) ? "" : row.key.slice(keyOf(item).length + 1);
+      const entries = Object.entries(check?.counts || {}).filter(([field]) => splitCountField(field).size === size);
+      const onHand = entries.find(([field]) => !isMade(field));
+      row.lists.push(list);
+      row.cells.push({ list, onHand: onHand ? onHand[1] : null, by: entries.length ? check!.employeeName : null });
+      for (const [field, value] of entries) if (isMade(field)) row.made += value;
+    }
+  }
+  // A plain row left over from before the grid, with nothing in it on this day, says nothing; drop it.
+  return [...rows.values()]
+    .filter((row) => row.made || row.cells.some((cell) => cell.onHand !== null) || ![...rows.keys()].some((key) => key.startsWith(`${row.key}:`)))
+    .map(({ lists: _lists, ...row }) => [...rows.keys()].some((key) => key.startsWith(`${row.key}:`)) ? { ...row, label: `${row.label} (all sizes)` } : row);
 }
 
 /** "Tue 10:42 AM" for a store time (today and yesterday say so). */
@@ -247,4 +274,29 @@ export function parseGoodForDays(value: unknown): number | null {
   const days = Number(value);
   if (!Number.isInteger(days) || days < 1 || days > 30) throw new Error("Good for: pick 1 to 30 days, or leave it empty.");
   return days;
+}
+
+/** Saved numbers in a line: "On hand 12 · Made today 40", or for a grid "Small 5 · Regular 8 (+2 made) · …". */
+export function formatCounts(counts: Record<string, number> | null | undefined): string {
+  if (!counts) return "";
+  const parts: string[] = [];
+  const sizes = new Map<string, { onHand?: number; made: number }>();
+  for (const [field, value] of Object.entries(counts)) {
+    const { size, column } = splitCountField(field);
+    if (!size) { parts.push(`${column} ${value}`); continue; }
+    const entry = sizes.get(size) || sizes.set(size, { made: 0 }).get(size)!;
+    if (isMade(field)) entry.made += value;
+    else entry.onHand = value;
+  }
+  for (const [size, entry] of sizes) parts.push(`${size} ${entry.onHand ?? "—"}${entry.made ? ` (+${entry.made} made)` : ""}`);
+  return parts.join(" · ");
+}
+
+/** The sizes of a grid count job ("Small", "Regular", …) with their columns, or null for a plain count. */
+export function countGrid(fields: string[]): { sizes: string[]; columns: string[] } | null {
+  if (!fields.length || !fields.every((field) => splitCountField(field).size)) return null;
+  return {
+    sizes: [...new Set(fields.map((field) => splitCountField(field).size))],
+    columns: [...new Set(fields.map((field) => splitCountField(field).column))],
+  };
 }

@@ -4,7 +4,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
   businessHour, cleanVideoUrl, decodeWorker, defaultChecklistId, encodeWorker, hourLabel, parseCountFields, parseCounts, parseOpensAtHour,
-  summarizeChecklistDay, summarizeCounts, tallyByEmployee, youtubeEmbedUrl, agoLabel, whenLabel, ageLabel, daysOld, madeLabel, parseGoodForDays, saladFreshness,
+  summarizeChecklistDay, summarizeCounts, tallyByEmployee, youtubeEmbedUrl, agoLabel, whenLabel, ageLabel, daysOld, madeLabel, parseGoodForDays, saladFreshness, countGrid, formatCounts,
   type HistoryCheck,
 } from "../src/lib/store-checklist-rules";
 import { businessDayBoundary } from "../src/lib/business-day";
@@ -136,9 +136,11 @@ test("checklists: count jobs need a whole number for every field", () => {
   assert.deepEqual(parseCountFields("On hand, Made today ,"), ["On hand", "Made today"]);
   assert.deepEqual(parseCountFields(""), []);
   assert.deepEqual(parseCountFields(["On hand", "On hand"]), ["On hand"]);
-  assert.throws(() => parseCountFields("a,b,c,d"), /At most 3/);
+  assert.throws(() => parseCountFields("a,b,c,d,e,f,g,h,i,j,k,l,m"), /At most 12/);
   assert.deepEqual(parseCounts(["On hand", "Made today"], { "On hand": "12", "Made today": 0 }), { "On hand": 12, "Made today": 0 });
-  assert.throws(() => parseCounts(["On hand", "Made today"], { "On hand": "12" }), /Made today/);
+  // A blank "Made" is 0; "On hand" is always needed.
+  assert.deepEqual(parseCounts(["On hand", "Made today"], { "On hand": "12" }), { "On hand": 12, "Made today": 0 });
+  assert.throws(() => parseCounts(["On hand", "Made today"], { "Made today": "3" }), /On hand/);
   assert.throws(() => parseCounts(["On hand"], { "On hand": "-1" }), /whole number/);
   assert.throws(() => parseCounts(["On hand"], { "On hand": "2.5" }), /whole number/);
   assert.throws(() => parseCounts(["On hand"], { "On hand": "100000" }), /whole number/);
@@ -236,4 +238,46 @@ test("checklists: 0053 adds good-for days and renames the fryers in place", () =
   assert.match(migration, /ADD COLUMN IF NOT EXISTS good_for_days integer/);
   assert.match(migration, /SET name = 'Left fryer'.*name = 'Fryer 1'/);
   assert.match(migration, /SET name = 'Right fryer'.*name = 'Fryer 2'/);
+});
+
+const DOUGH = ["Small", "Regular", "Jumbo", "Thick"].flatMap((size) => [`${size} · On hand`, `${size} · Made today`]);
+
+test("checklists: pizza dough is counted as a grid by size", () => {
+  assert.deepEqual(countGrid(DOUGH), { sizes: ["Small", "Regular", "Jumbo", "Thick"], columns: ["On hand", "Made today"] });
+  assert.equal(countGrid(["On hand", "Made today"]), null);
+  const counts = parseCounts(DOUGH, { "Small · On hand": "4", "Regular · On hand": "10", "Regular · Made today": "6", "Jumbo · On hand": "2", "Thick · On hand": "0" });
+  assert.equal(counts["Small · Made today"], 0);
+  assert.equal(formatCounts(counts), "Small 4 · Regular 10 (+6 made) · Jumbo 2 · Thick 0");
+  assert.equal(formatCounts({ "On hand": 12, "Made today": 40 }), "On hand 12 · Made today 40");
+  assert.throws(() => parseCounts(DOUGH, { "Small · On hand": "4" }), /Regular · On hand/);
+});
+
+test("checklists: dough usage rows per size, and an old single-number count still shows", () => {
+  const lists = [{ id: "open", name: "Opening", position: 10 }, { id: "close", name: "Closing", position: 30 }];
+  const shift = ["Small", "Regular", "Jumbo", "Thick"].flatMap((size) => [`${size} · On hand`, `${size} · Made this shift`]);
+  const items = [
+    { id: "d1", checklistId: "open", label: "Pizza dough count", position: 10, createdAt: "2026-11-01T00:00:00Z", archivedAt: null, countFields: DOUGH, countKey: "pizza-dough" },
+    { id: "d3", checklistId: "close", label: "Pizza dough count", position: 10, createdAt: "2026-11-01T00:00:00Z", archivedAt: null, countFields: shift, countKey: "pizza-dough" },
+  ];
+  const rows = summarizeCounts(lists, items, [
+    check("d1", "Sam", { counts: { "Small · On hand": 4, "Small · Made today": 6, "Regular · On hand": 10, "Regular · Made today": 0, "Jumbo · On hand": 2, "Jumbo · Made today": 0, "Thick · On hand": 1, "Thick · Made today": 0 } }),
+    // Saved before the grid: one number for all dough.
+    check("d3", "Lee", { counts: { "On hand": 9, "Made this shift": 3 } }),
+  ]);
+  assert.deepEqual(rows.map((row) => row.label), ["Pizza dough – Small", "Pizza dough – Regular", "Pizza dough – Jumbo", "Pizza dough – Thick", "Pizza dough (all sizes)"]);
+  const small = rows.find((row) => row.label.endsWith("Small"))!;
+  assert.deepEqual(small.cells, [{ list: "Opening", onHand: 4, by: "Sam" }, { list: "Closing", onHand: null, by: null }]);
+  assert.equal(small.made, 6);
+  const old = rows.find((row) => row.label === "Pizza dough (all sizes)")!;
+  assert.deepEqual(old.cells, [{ list: "Opening", onHand: null, by: null }, { list: "Closing", onHand: 9, by: "Lee" }]);
+  assert.equal(old.made, 3);
+  // No old entry that day: no plain row.
+  assert.equal(summarizeCounts(lists, items, []).some((row) => row.label.startsWith("Pizza dough (")), false);
+});
+
+test("checklists: 0054 turns all three dough counts into the size grid", () => {
+  const migration = readFileSync("db/migrations/0054_pizza_dough_sizes.sql", "utf8");
+  assert.match(migration, /'Small · On hand', 'Small · ' \|\| made\.label, 'Regular · On hand'/);
+  assert.match(migration, /'Jumbo · On hand', 'Jumbo · ' \|\| made\.label, 'Thick · On hand', 'Thick · ' \|\| made\.label/);
+  assert.match(migration, /count_key = 'pizza-dough'/);
 });

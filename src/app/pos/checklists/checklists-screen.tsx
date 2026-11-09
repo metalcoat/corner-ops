@@ -2,7 +2,7 @@
 // The deli's checklist screen: tap an item (or a salad), type a PIN once, and keep tapping for a few minutes as
 // that person. Built to stay out of the way: one tap per job, and "Mark the rest done" for the end of the night.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { agoLabel, defaultChecklistId, whenLabel } from "@/lib/store-checklist-rules";
+import { COUNT_SIZE_SEPARATOR, agoLabel, countGrid, defaultChecklistId, formatCounts, whenLabel } from "@/lib/store-checklist-rules";
 import SaladCaseTable from "@/components/salad-case-table";
 
 type Check = { id: number; employeeName: string; checkedAt: string; counts: Record<string, number> | null };
@@ -31,7 +31,8 @@ const time = (iso: string) => new Intl.DateTimeFormat("en-US", { timeZone: "Amer
 const dayTime = (iso: string, today: string, businessDate: string) =>
   businessDate === today ? `Today ${time(iso)}` : new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", hour: "numeric", minute: "2-digit" }).format(new Date(iso));
 const first = (name: string) => name.split(/\s+/)[0];
-const countText = (counts: Record<string, number> | null) => (counts ? Object.entries(counts).map(([field, value]) => `${field} ${value}`).join(" · ") : "");
+const countText = formatCounts;
+const countHint = (fields: string[]) => countGrid(fields)?.sizes.join(", ") ?? fields.join(", ");
 
 export default function ChecklistsScreen() {
   const [screen, setScreen] = useState<Screen | null>(null);
@@ -209,7 +210,7 @@ export default function ChecklistsScreen() {
                     <span className="ckLabel">
                       <strong>{item.label}</strong>
                       {item.check && <small>{first(item.check.employeeName)} · {time(item.check.checkedAt)}{item.check.counts ? ` · ${countText(item.check.counts)}` : ""}</small>}
-                      {!item.check && item.countFields.length > 0 && <small className="ckCountHint">Tap to count: {item.countFields.join(", ")}</small>}
+                      {!item.check && item.countFields.length > 0 && <small className="ckCountHint">Tap to count: {countHint(item.countFields)}</small>}
                     </span>
                   </button>
                   {(item.howTo || item.video) && (
@@ -392,21 +393,39 @@ function BatchSheet({ batch, busy, onClose, onSave, onUndo }: { batch: Batch; bu
   );
 }
 
-/** Big number boxes for a count job ("On hand", "Made today"); the PIN comes after if nobody is signed in. */
+/**
+ * Big number boxes for a count job ("On hand", "Made today"), or a grid with a row per size (pizza dough: Small,
+ * Regular, Jumbo, Thick). On hand is needed for every size; a blank Made counts as 0. The PIN comes after if needed.
+ */
 function CountDialog({ item, onSave, onCancel }: { item: Item; onSave: (counts: Record<string, string>) => void; onCancel: () => void }) {
   const [values, setValues] = useState<Record<string, string>>({});
-  const ready = item.countFields.every((field) => /^\d{1,5}$/.test(values[field] || ""));
+  const made = (field: string) => /^made\b/i.test(field.split(COUNT_SIZE_SEPARATOR).pop() || "");
+  const ready = item.countFields.every((field) => (made(field) && !values[field]) || /^\d{1,5}$/.test(values[field] || ""));
+  const grid = countGrid(item.countFields);
+  const box = (field: string, label: string, focus: boolean) => (
+    <input inputMode="numeric" pattern="[0-9]*" autoFocus={focus} autoComplete="off" aria-label={label} placeholder={made(field) ? "0" : ""} value={values[field] || ""}
+      onChange={(event) => setValues((current) => ({ ...current, [field]: event.target.value.replace(/\D/g, "").slice(0, 5) }))} />
+  );
   return (
     <div className="ckModal" role="dialog" aria-modal="true" aria-label={item.label}>
       <section>
         <h2>{item.label}</h2>
         {item.howTo && <p>{item.howTo}</p>}
         <form className="ckCounts" onSubmit={(event) => { event.preventDefault(); if (ready) onSave(values); }}>
-          {item.countFields.map((field, index) => (
+          {grid ? (
+            <table className="ckCountGrid">
+              <thead><tr><th />{grid.columns.map((column) => <th key={column}>{column}</th>)}</tr></thead>
+              <tbody>
+                {grid.sizes.map((size, row) => <tr key={size}>
+                  <th scope="row">{size}</th>
+                  {grid.columns.map((column, col) => { const field = `${size}${COUNT_SIZE_SEPARATOR}${column}`; return <td key={column}>{item.countFields.includes(field) ? box(field, `${size} ${column}`, row === 0 && col === 0) : null}</td>; })}
+                </tr>)}
+              </tbody>
+            </table>
+          ) : item.countFields.map((field, index) => (
             <label key={field}>
               <span>{field}</span>
-              <input inputMode="numeric" pattern="[0-9]*" autoFocus={index === 0} autoComplete="off" value={values[field] || ""}
-                onChange={(event) => setValues((current) => ({ ...current, [field]: event.target.value.replace(/\D/g, "").slice(0, 5) }))} />
+              {box(field, field, index === 0)}
             </label>
           ))}
           <div className="ckChoices">

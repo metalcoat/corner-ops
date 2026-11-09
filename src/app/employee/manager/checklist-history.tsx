@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ManagerReportView } from "@/lib/ordering-manager-report";
 import StoreChecklistSetup from "@/components/store-checklist-setup";
 import SaladCaseTable from "@/components/salad-case-table";
+import { formatCounts } from "@/lib/store-checklist-rules";
 
 type Check = { employeeName: string; checkedAt: string; bulk: boolean; counts?: Record<string, number> | null; undoneAt: string | null; undoneByName: string | null; undoReason: string | null };
 type ListDay = { checklistId: string; name: string; done: number; total: number; missed: string[]; items: Array<{ itemId: string; label: string; check: Check | null; undone: Check[] }> };
@@ -17,7 +18,7 @@ type OilChange = { id: number; businessDate: string; fryerName: string; employee
 type History = { today: string; days: Day[]; oilChanges: OilChange[]; lastDone: { salads: CaseLast[]; fryers: Last[] }; people: Array<{ name: string; checks: number; undone: number; batches: number }> };
 
 const time = (iso: string) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" }).format(new Date(iso));
-const countText = (counts?: Record<string, number> | null) => (counts ? Object.entries(counts).map(([field, value]) => `${field} ${value}`).join(" · ") : "");
+const countText = formatCounts;
 const dayLabel = (date: string) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" }).format(new Date(`${date}T12:00:00Z`));
 
 function Section({ title, count, children }: { title: string; count?: number; children: React.ReactNode }) {

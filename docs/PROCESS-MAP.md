@@ -730,7 +730,7 @@ flowchart LR
 - Lists start over each 4 AM business day (`businessDateOf`). Tables `store_checklists`, `store_checklist_items`,
   `store_checklist_checks`, `deli_salads`, `deli_salad_batches` (migration 0049, which also seeds placeholder jobs;
   0050 sets the real salads Chris gave 2026-11-09: Macaroni, Potato, Pasta, Green Bean, Brown Bean, Cole Slaw,
-  Antipasto; **apply 0049–0053 on production at the switchover**). Code: `src/lib/store-checklists.ts`,
+  Antipasto; **apply 0049–0054 on production at the switchover**). Code: `src/lib/store-checklists.ts`,
   pure rules `src/lib/store-checklist-rules.ts` (tests `tests/store-checklists.test.ts`).
 - Jobs (migration 0051, Chris's real lists 2026-11-09: Opening/prep 44, Mid-day 5, Closing 15; two marked placeholder
   until Chris confirms them) can carry a how-to note (a small "How?" button opens it without ticking the job), a
@@ -738,7 +738,10 @@ flowchart LR
   `youtubeEmbedUrl`), and count fields: Sub rolls, Hamburger buns and Pizza dough are counted at Opening (On hand /
   Made today), Mid-day and Closing (On hand / Made this shift). A count is typed in with the tick and saved in
   `store_checklist_checks.counts`; "Mark the rest done" leaves counts for someone to count. History shows a per-day
-  table per counted thing (start, shift change, close, made), grouped by `count_key`.
+  table per counted thing (start, shift change, close, made), grouped by `count_key`. Pizza dough is a grid by size
+  (Small / Regular / Jumbo / Thick × On hand / Made; fields named "Size · Column", migration 0054): On hand is required
+  for every size, a blank Made is 0, and history has a row per size (older single-number dough counts show as
+  "Pizza dough (all sizes)").
 - Salads & fryers tab: a card per deli salad and per fryer saying when it was last done, how long ago and by whom,
   each with one big button ("Made a batch" / "Oil changed / filled", then PIN; Undo for a mis-tap). Fryers live in
   `store_fryers`, oil changes in `store_fryer_oil_changes` (migration 0052, seeds Fryer 1 and Fryer 2; it also
@@ -872,5 +875,5 @@ flowchart LR
 5. Missed-call alerts read `rezku_shifts` to know who is on shift — move to the new clock.
 6. Staff re-enable notifications on team.ordercornerdeli.com (old Vercel installs).
 7. Rezku menu capture workflow fails on the runner (needs sudo for browser deps); retire with Rezku.
-8. Store checklists (§8d-1): apply migrations 0049–0053 on production.
+8. Store checklists (§8d-1): apply migrations 0049–0054 on production.
 9. MX: questions to MX support (terminal model, fees, receipts, PIN debit tips, can the Dejavoo Z6 read our own gift card stripes for the POS) before ordering hardware.
