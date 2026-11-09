@@ -292,3 +292,9 @@ test("checklists: 0055 gives Macaroni, Potato and Cole Slaw 3 days, leaving mana
   assert.equal(saladFreshness("2026-11-09T15:00:00Z", 3, new Date("2026-11-11T15:00:00Z")), "last");
   assert.equal(saladFreshness("2026-11-09T15:00:00Z", 3, new Date("2026-11-12T05:30:00Z")), "past");
 });
+
+test("checklists: 0056 sets the rest of the salad limits and the dough make-today plan", () => {
+  const migration = readFileSync("db/migrations/0056_salad_limits_and_dough_plan.sql", "utf8");
+  assert.match(migration, /\('Pasta', 7\), \('Green Bean', 7\), \('Antipasto', 7\), \('Brown Bean', 10\)/);
+  assert.match(migration, /'pizza-dough', '\{"Small": 10, "Regular": 10, "Thick": 5\}'::jsonb, 'Jumbo'/);
+});
