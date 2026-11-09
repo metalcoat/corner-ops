@@ -29,3 +29,7 @@
 .ckSetupItem button{justify-self:start}
 .ckSetup.ckSetup label{grid-template-columns:none;padding:0;border-bottom:0}
 .ckSetup.ckSetup label.ckGoodFor{display:flex;align-items:center;gap:6px}.ckGoodFor span{font-size:.82rem;opacity:.8}
+.ckPlan{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin:6px 0 0;padding:10px;border:1px dashed color-mix(in srgb,currentColor 30%,transparent);border-radius:8px}
+.ckPlan legend{padding:0 4px;font-size:.85rem;font-weight:700}
+.ckPlan em{font-style:normal;opacity:.75;padding:8px 0}
+.ckPlan button{grid-column:1/-1}

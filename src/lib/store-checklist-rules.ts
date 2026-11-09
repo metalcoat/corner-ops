@@ -305,3 +305,44 @@ export function countGrid(fields: string[]): { sizes: string[]; columns: string[
     columns: [...new Set(fields.map((field) => splitCountField(field).column))],
   };
 }
+
+export type CountPlan = { minimums: Record<string, number>; leftoverSize: string };
+
+/**
+ * What to make now, per size, to get back to each size's minimum on hand; the leftover size (thin Jumbo for
+ * dough) takes the rest of the batch. A size not counted yet suggests nothing. When a batch's exact yield is
+ * known (Chris will weigh one), the leftover can become a number: add it here and keep the same rows.
+ */
+export function suggestMake(sizes: string[], onHand: Record<string, number | null | undefined>, plan: CountPlan) {
+  return sizes.map((size) => {
+    const minimum = plan.minimums[size];
+    const have = onHand[size];
+    if (size === plan.leftoverSize) return { size, minimum: null, make: null, leftover: true };
+    if (minimum === undefined || minimum === null) return { size, minimum: null, make: null, leftover: false };
+    return { size, minimum, make: have === null || have === undefined ? null : Math.max(0, minimum - have), leftover: false };
+  });
+}
+
+/** Minimums typed in the editor: whole numbers 0 … 999 per size; blank = no minimum. */
+export function parsePlan(sizes: string[], input: { minimums?: unknown; leftoverSize?: unknown }): CountPlan {
+  const raw = input.minimums && typeof input.minimums === "object" ? (input.minimums as Record<string, unknown>) : {};
+  const minimums: Record<string, number> = {};
+  for (const size of sizes) {
+    const value = raw[size];
+    if (value === undefined || value === null || String(value).trim() === "") continue;
+    const number = Number(String(value).trim());
+    if (!Number.isInteger(number) || number < 0 || number > 999) throw new Error(`Minimum for ${size}: a whole number, or blank.`);
+    minimums[size] = number;
+  }
+  const leftoverSize = String(input.leftoverSize ?? "").trim();
+  if (leftoverSize && !sizes.includes(leftoverSize)) throw new Error("Pick one of the sizes for the rest of the batch.");
+  if (leftoverSize) delete minimums[leftoverSize];
+  return { minimums, leftoverSize };
+}
+
+/** Last night's on-hand numbers that fit this morning's count fields (Made fields are never carried over). */
+export function carryOverOnHand(fields: string[], previous: Record<string, number> | null | undefined): Record<string, number> {
+  const carried: Record<string, number> = {};
+  for (const field of fields) if (!isMade(field) && previous && typeof previous[field] === "number") carried[field] = previous[field];
+  return carried;
+}

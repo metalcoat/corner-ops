@@ -741,7 +741,11 @@ flowchart LR
   table per counted thing (start, shift change, close, made), grouped by `count_key`. Pizza dough is a grid by size
   (Small / Regular / Jumbo / Thick × On hand / Made; fields named "Size · Column", migration 0054): On hand is required
   for every size, a blank Made is 0, and history has a row per size (older single-number dough counts show as
-  "Pizza dough (all sizes)").
+  "Pizza dough (all sizes)"). The Opening dough count starts filled in from last night's Closing count (on hand only;
+  "Filled in from last night's close, by …"); and at Opening and Mid-day the grid shows "Make today" per size: back up
+  to each size's minimum (Small 10, Regular 10, Thick 5) with the rest of the batch going to thin Jumbo
+  (`store_count_plans`, migration 0056, edited under the dough job's Edit panel; `batch_yield` is kept for when a
+  batch is weighed and its exact yield is known; `suggestMake` in `src/lib/store-checklist-rules.ts`).
 - Salads & fryers tab: a card per deli salad and per fryer saying when it was last done, how long ago and by whom,
   each with one big button ("Made a batch" / "Oil changed / filled", then PIN; Undo for a mis-tap). Fryers live in
   `store_fryers`, oil changes in `store_fryer_oil_changes` (migration 0052, seeds Fryer 1 and Fryer 2; it also

@@ -2,15 +2,15 @@
 // Managers edit the store checklists and the deli salad buttons (POS Settings and the manager portal).
 // Switching something off hides it from the screen and keeps its history; nothing here deletes.
 import { useEffect, useState } from "react";
-import { hourLabel } from "@/lib/store-checklist-rules";
+import { countGrid, hourLabel, type CountPlan } from "@/lib/store-checklist-rules";
 import "./store-checklist-setup.css";
 
 type Entry = { id: string; placeholder?: boolean; active: boolean };
-type Item = Entry & { label: string; howTo: string; videoUrl: string; countFields: string[] };
+type Item = Entry & { label: string; howTo: string; videoUrl: string; countFields: string[]; countKey: string };
 type List = Entry & { name: string; opensAtHour: number; items: Item[] };
 type Salad = Entry & { name: string; goodForDays: number | null };
 type Fryer = Entry & { name: string };
-type Setup = { lists: List[]; salads: Salad[]; fryers: Fryer[] };
+type Setup = { lists: List[]; salads: Salad[]; fryers: Fryer[]; plans: Record<string, CountPlan> };
 type Kind = "list" | "item" | "salad" | "fryer";
 
 const HOURS = Array.from({ length: 24 }, (_, index) => index + 4);
@@ -70,6 +70,7 @@ export default function StoreChecklistSetup() {
             <ol>
               {list.items.map((item, itemIndex) => (
                 <ItemRow key={item.id} item={item} listId={list.id} lists={setup.lists} first={itemIndex === 0} last={itemIndex === list.items.length - 1}
+                  plan={setup.plans[item.countKey]} onSavePlan={(plan) => send("PUT", { kind: "plan", countKey: item.countKey, ...plan }, "Make-today minimums saved.")}
                   onMove={(direction) => move("item", item.id, direction)}
                   onSave={(change, done) => send("PUT", { kind: "item", id: item.id, name: item.label, active: item.active, checklistId: list.id, howTo: item.howTo, videoUrl: item.videoUrl, countFields: item.countFields, ...change }, done || "Saved.")} />
               ))}
@@ -128,8 +129,9 @@ function ListEditor({ list, onSave }: { list: List; onSave: (change: { name?: st
 }
 
 /** One job: wording, order and on/off at a glance; "Edit" opens the list it's on, the how-to note, video and counts. */
-function ItemRow({ item, listId, lists, first, last, onMove, onSave }: {
+function ItemRow({ item, listId, lists, first, last, onMove, onSave, plan, onSavePlan }: {
   item: Item; listId: string; lists: List[]; first: boolean; last: boolean;
+  plan?: CountPlan; onSavePlan: (plan: { minimums: Record<string, string>; leftoverSize: string }) => Promise<boolean>;
   onMove: (direction: "up" | "down") => void;
   onSave: (change: { name?: string; active?: boolean; checklistId?: string; howTo?: string; videoUrl?: string; countFields?: string }, done?: string) => Promise<boolean>;
 }) {
@@ -165,9 +167,34 @@ function ItemRow({ item, listId, lists, first, last, onMove, onSave }: {
           <label><span>How-to video (YouTube link, optional)</span><input value={videoUrl} inputMode="url" placeholder="https://youtu.be/…" onChange={(event) => setVideoUrl(event.target.value)} /></label>
           <label><span>Ask for numbers (comma separated, e.g. On hand, Made today; blank = just a check)</span><input value={counts} maxLength={80} onChange={(event) => setCounts(event.target.value)} /></label>
           <button type="button" disabled={!changed || !value.trim()} onClick={async () => { if (await onSave({ name: value, howTo, videoUrl, countFields: counts })) setOpen(false); }}>Save job</button>
+          {item.countKey && countGrid(item.countFields) && <PlanEditor sizes={countGrid(item.countFields)!.sizes} plan={plan} onSave={onSavePlan} />}
         </div>
       )}
     </li>
+  );
+}
+
+/** "Make today" for a count by size: each size's minimum on hand, and which size takes the rest of the batch. */
+function PlanEditor({ sizes, plan, onSave }: { sizes: string[]; plan?: CountPlan; onSave: (plan: { minimums: Record<string, string>; leftoverSize: string }) => Promise<boolean> }) {
+  const start = () => Object.fromEntries(sizes.map((size) => [size, plan?.minimums[size] === undefined ? "" : String(plan.minimums[size])]));
+  const [minimums, setMinimums] = useState<Record<string, string>>(start);
+  const [leftover, setLeftover] = useState(plan?.leftoverSize || "");
+  return (
+    <fieldset className="ckPlan">
+      <legend>Make today: keep at least this many on hand (applies at every count of this item)</legend>
+      {sizes.map((size) => (
+        <label key={size}><span>{size}</span>
+          {size === leftover ? <em>rest of the batch</em> : <input inputMode="numeric" value={minimums[size] || ""} placeholder="no minimum" onChange={(event) => setMinimums((current) => ({ ...current, [size]: event.target.value.replace(/\D/g, "").slice(0, 3) }))} />}
+        </label>
+      ))}
+      <label><span>Rest of the batch goes to</span>
+        <select value={leftover} onChange={(event) => setLeftover(event.target.value)}>
+          <option value="">nothing</option>
+          {sizes.map((size) => <option key={size} value={size}>{size}</option>)}
+        </select>
+      </label>
+      <button type="button" onClick={() => void onSave({ minimums, leftoverSize: leftover })}>Save minimums</button>
+    </fieldset>
   );
 }
 

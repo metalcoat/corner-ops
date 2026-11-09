@@ -2,11 +2,14 @@
 // The deli's checklist screen: tap an item (or a salad), type a PIN once, and keep tapping for a few minutes as
 // that person. Built to stay out of the way: one tap per job, and "Mark the rest done" for the end of the night.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { COUNT_SIZE_SEPARATOR, agoLabel, countGrid, defaultChecklistId, formatCounts, whenLabel } from "@/lib/store-checklist-rules";
+import { COUNT_SIZE_SEPARATOR, agoLabel, countGrid, defaultChecklistId, formatCounts, suggestMake, whenLabel, type CountPlan } from "@/lib/store-checklist-rules";
 import SaladCaseTable from "@/components/salad-case-table";
 
 type Check = { id: number; employeeName: string; checkedAt: string; counts: Record<string, number> | null };
-type Item = { id: string; label: string; howTo: string; video: string | null; countFields: string[]; check: Check | null };
+type Item = {
+  id: string; label: string; howTo: string; video: string | null; countFields: string[]; check: Check | null;
+  prefill: { counts: Record<string, number>; by: string; at: string } | null; plan: CountPlan | null;
+};
 type List = { id: string; name: string; opensAtHour: number; items: Item[] };
 type Last = { at: string; by: string } | null;
 type Salad = { id: string; name: string; last: Last; goodForDays: number | null };
@@ -398,10 +401,17 @@ function BatchSheet({ batch, busy, onClose, onSave, onUndo }: { batch: Batch; bu
  * Regular, Jumbo, Thick). On hand is needed for every size; a blank Made counts as 0. The PIN comes after if needed.
  */
 function CountDialog({ item, onSave, onCancel }: { item: Item; onSave: (counts: Record<string, string>) => void; onCancel: () => void }) {
-  const [values, setValues] = useState<Record<string, string>>({});
+  // The morning count starts from last night's close; staff change any number that's off.
+  const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(item.prefill?.counts || {}).map(([field, value]) => [field, String(value)])));
   const made = (field: string) => /^made\b/i.test(field.split(COUNT_SIZE_SEPARATOR).pop() || "");
   const ready = item.countFields.every((field) => (made(field) && !values[field]) || /^\d{1,5}$/.test(values[field] || ""));
   const grid = countGrid(item.countFields);
+  // "Make today": back up to each size's minimum from what's on hand now; the leftover size gets the rest.
+  const suggestions = grid && item.plan ? suggestMake(grid.sizes, Object.fromEntries(grid.sizes.map((size) => {
+    const field = item.countFields.find((entry) => entry.startsWith(`${size}${COUNT_SIZE_SEPARATOR}`) && !made(entry));
+    const raw = field ? values[field] : "";
+    return [size, raw && /^\d+$/.test(raw) ? Number(raw) : null];
+  })), item.plan) : null;
   const box = (field: string, label: string, focus: boolean) => (
     <input inputMode="numeric" pattern="[0-9]*" autoFocus={focus} autoComplete="off" aria-label={label} placeholder={made(field) ? "0" : ""} value={values[field] || ""}
       onChange={(event) => setValues((current) => ({ ...current, [field]: event.target.value.replace(/\D/g, "").slice(0, 5) }))} />
@@ -411,14 +421,19 @@ function CountDialog({ item, onSave, onCancel }: { item: Item; onSave: (counts: 
       <section>
         <h2>{item.label}</h2>
         {item.howTo && <p>{item.howTo}</p>}
+        {item.prefill && <p className="ckPrefill">Filled in from last night&apos;s close, by {first(item.prefill.by)} {time(item.prefill.at)}. Fix any number that&apos;s off.</p>}
         <form className="ckCounts" onSubmit={(event) => { event.preventDefault(); if (ready) onSave(values); }}>
           {grid ? (
             <table className="ckCountGrid">
-              <thead><tr><th />{grid.columns.map((column) => <th key={column}>{column}</th>)}</tr></thead>
+              <thead><tr><th />{grid.columns.map((column) => <th key={column}>{column}</th>)}{suggestions && <th className="ckMake">Make today</th>}</tr></thead>
               <tbody>
                 {grid.sizes.map((size, row) => <tr key={size}>
                   <th scope="row">{size}</th>
                   {grid.columns.map((column, col) => { const field = `${size}${COUNT_SIZE_SEPARATOR}${column}`; return <td key={column}>{item.countFields.includes(field) ? box(field, `${size} ${column}`, row === 0 && col === 0) : null}</td>; })}
+                  {suggestions && (() => {
+                    const hint = suggestions.find((entry) => entry.size === size)!;
+                    return <td className="ckMake">{hint.leftover ? <span>Rest of the batch</span> : hint.minimum === null ? "" : hint.make === null ? <small>min {hint.minimum}</small> : <><b>{hint.make}</b><small>min {hint.minimum}</small></>}</td>;
+                  })()}
                 </tr>)}
               </tbody>
             </table>

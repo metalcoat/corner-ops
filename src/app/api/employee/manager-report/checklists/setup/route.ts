@@ -1,6 +1,6 @@
 import { isoJson } from "@/lib/timestamp-values";
 import { checklistManager } from "@/lib/store-checklist-access";
-import { checklistSetup, moveSetupEntry, saveSetupEntry, type SetupKind } from "@/lib/store-checklists";
+import { checklistSetup, moveSetupEntry, saveCountPlan, saveSetupEntry, type SetupKind } from "@/lib/store-checklists";
 
 export const runtime = "nodejs";
 
@@ -14,12 +14,15 @@ export async function GET() {
   return isoJson(await checklistSetup());
 }
 
-/** Add (no id) or change one list, item or salad. */
+/** Add (no id) or change one list, item, salad or fryer, or a count's make-today plan. */
 export async function PUT(request: Request) {
   const actor = await checklistManager();
   if (!actor) return denied();
   try {
-    await saveSetupEntry((await request.json()) as Record<string, unknown>, actor.name);
+    const body = (await request.json()) as Record<string, unknown>;
+    // kind "plan": a counted thing's make-today minimums by size (pizza dough).
+    if (body.kind === "plan") await saveCountPlan(String(body.countKey || ""), { minimums: body.minimums, leftoverSize: body.leftoverSize }, actor.name);
+    else await saveSetupEntry(body, actor.name);
     return isoJson(await checklistSetup());
   } catch (error) {
     return fail(error);

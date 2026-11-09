@@ -4,7 +4,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
   businessHour, cleanVideoUrl, decodeWorker, defaultChecklistId, encodeWorker, hourLabel, parseCountFields, parseCounts, parseOpensAtHour,
-  summarizeChecklistDay, summarizeCounts, tallyByEmployee, youtubeEmbedUrl, agoLabel, whenLabel, ageLabel, daysOld, madeLabel, parseGoodForDays, saladFreshness, countGrid, formatCounts,
+  summarizeChecklistDay, summarizeCounts, tallyByEmployee, youtubeEmbedUrl, agoLabel, whenLabel, ageLabel, daysOld, madeLabel, parseGoodForDays, saladFreshness, countGrid, formatCounts, carryOverOnHand, parsePlan, suggestMake,
   type HistoryCheck,
 } from "../src/lib/store-checklist-rules";
 import { businessDayBoundary } from "../src/lib/business-day";
@@ -297,4 +297,31 @@ test("checklists: 0056 sets the rest of the salad limits and the dough make-toda
   const migration = readFileSync("db/migrations/0056_salad_limits_and_dough_plan.sql", "utf8");
   assert.match(migration, /\('Pasta', 7\), \('Green Bean', 7\), \('Antipasto', 7\), \('Brown Bean', 10\)/);
   assert.match(migration, /'pizza-dough', '\{"Small": 10, "Regular": 10, "Thick": 5\}'::jsonb, 'Jumbo'/);
+});
+
+const DOUGH_PLAN = { minimums: { Small: 10, Regular: 10, Thick: 5 }, leftoverSize: "Jumbo" };
+
+test("checklists: make today tops each dough size up to its minimum, thin Jumbo takes the rest", () => {
+  assert.deepEqual(suggestMake(["Small", "Regular", "Jumbo", "Thick"], { Small: 4, Regular: 12, Jumbo: 3, Thick: null }, DOUGH_PLAN), [
+    { size: "Small", minimum: 10, make: 6, leftover: false },
+    { size: "Regular", minimum: 10, make: 0, leftover: false },
+    { size: "Jumbo", minimum: null, make: null, leftover: true },
+    // Not counted yet: nothing to suggest.
+    { size: "Thick", minimum: 5, make: null, leftover: false },
+  ]);
+});
+
+test("checklists: make-today minimums from the editor", () => {
+  const sizes = ["Small", "Regular", "Jumbo", "Thick"];
+  assert.deepEqual(parsePlan(sizes, { minimums: { Small: "10", Regular: "10", Jumbo: "", Thick: 5 }, leftoverSize: "Jumbo" }), DOUGH_PLAN);
+  // The leftover size never keeps a minimum.
+  assert.deepEqual(parsePlan(sizes, { minimums: { Jumbo: "4" }, leftoverSize: "Jumbo" }), { minimums: {}, leftoverSize: "Jumbo" });
+  assert.throws(() => parsePlan(sizes, { minimums: { Small: "-1" } }), /Small/);
+  assert.throws(() => parsePlan(sizes, { leftoverSize: "Huge" }), /sizes/);
+});
+
+test("checklists: the morning count carries last night's on hand, never what was made", () => {
+  assert.deepEqual(carryOverOnHand(DOUGH, { "Small · On hand": 7, "Small · Made this shift": 3, "Jumbo · On hand": 0 }), { "Small · On hand": 7, "Jumbo · On hand": 0 });
+  assert.deepEqual(carryOverOnHand(DOUGH, null), {});
+  assert.deepEqual(carryOverOnHand(["On hand", "Made today"], { "On hand": 12, "Made this shift": 30 }), { "On hand": 12 });
 });

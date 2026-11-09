@@ -1,4 +1,4 @@
-// Store checklists, the deli salad log and the fryer oil log (db/migrations/0049–0053). The in-store screen (/pos/checklists) ticks
+// Store checklists, the deli salad log and the fryer oil log (db/migrations/0049–0056). The in-store screen (/pos/checklists) ticks
 // items and logs salad batches as whoever last typed their PIN there; managers edit the lists in POS Settings or
 // the manager portal and read the history in the manager portal. Lists start over each 4 AM business day.
 import { getSql, withTransaction } from "@/lib/db";
@@ -7,7 +7,7 @@ import { businessDateOf } from "@/lib/ordering-registers";
 import { constantTimeEqual, hmacSignature } from "@/lib/security-keys";
 import { toIsoTimestamp, toIsoTimestampOrEmpty } from "@/lib/timestamp-values";
 import {
-  CHECKLIST_LIMITS, CHECKLIST_WORKER_IDLE_MS, cleanText, cleanVideoUrl, decodeWorker, encodeWorker, parseCountFields, parseCounts, parseGoodForDays, parseOpensAtHour,
+  CHECKLIST_LIMITS, CHECKLIST_WORKER_IDLE_MS, cleanText, cleanVideoUrl, decodeWorker, encodeWorker, parseCountFields, parseCounts, carryOverOnHand, countGrid, parseGoodForDays, parseOpensAtHour, parsePlan,
   summarizeChecklistDay, summarizeCounts, tallyByEmployee, youtubeEmbedUrl,
   type ChecklistWorker, type HistoryCheck, type HistoryItem, type HistoryList,
 } from "@/lib/store-checklist-rules";
@@ -69,9 +69,11 @@ export async function checklistScreen(now = new Date()) {
   const today = businessDateOf(now);
   const since = new Date(`${today}T12:00:00Z`);
   since.setUTCDate(since.getUTCDate() - 3);
-  const [lists, items, checks, salads, batches, fryers] = await Promise.all([
+  const yesterday = new Date(`${today}T12:00:00Z`);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  const [lists, items, checks, salads, batches, fryers, plans] = await Promise.all([
     sql`SELECT id,name,position,opens_at_hour FROM store_checklists WHERE business=${BUSINESS} AND archived_at IS NULL ORDER BY position,created_at`,
-    sql`SELECT item.id,item.checklist_id,item.label,item.position,item.how_to,item.video_url,item.count_fields FROM store_checklist_items item JOIN store_checklists list ON list.id=item.checklist_id
+    sql`SELECT item.id,item.checklist_id,item.label,item.position,item.how_to,item.video_url,item.count_fields,item.count_key FROM store_checklist_items item JOIN store_checklists list ON list.id=item.checklist_id
         WHERE item.business=${BUSINESS} AND item.archived_at IS NULL AND list.archived_at IS NULL ORDER BY item.position,item.created_at`,
     sql`SELECT * FROM store_checklist_checks WHERE business=${BUSINESS} AND business_date=${today} AND undone_at IS NULL`,
     sql`SELECT salad.id,salad.name,salad.good_for_days,last.made_at,last.employee_name FROM deli_salads salad
@@ -79,17 +81,35 @@ export async function checklistScreen(now = new Date()) {
         WHERE salad.business=${BUSINESS} AND salad.archived_at IS NULL ORDER BY salad.position,salad.created_at`,
     sql`SELECT * FROM deli_salad_batches WHERE business=${BUSINESS} AND business_date>=${since.toISOString().slice(0, 10)} AND voided_at IS NULL ORDER BY made_at DESC LIMIT 60`,
     lastOilChanges(true),
+    countPlans(),
   ]);
   const ticks = new Map(checks.map((row) => [String(row.item_id), toCheck(row)]));
+  // The morning count starts from last night's close (the list that opens latest); suggestions show on every
+  // list but that last one, which is counting what's left for tomorrow.
+  const byHour = [...lists].sort((a, b) => Number(a.opens_at_hour) - Number(b.opens_at_hour));
+  const firstList = byHour[0] ? String(byHour[0].id) : "", lastList = byHour.length > 1 ? String(byHour[byHour.length - 1].id) : "";
+  const carryKeys = [...new Set(items.filter((item) => String(item.checklist_id) === firstList && String(item.count_key || "")).map((item) => String(item.count_key)))];
+  const closing = carryKeys.length && lastList ? await sql`
+    SELECT DISTINCT ON (item.count_key) item.count_key,tick.counts,tick.employee_name,tick.checked_at
+    FROM store_checklist_checks tick JOIN store_checklist_items item ON item.id=tick.item_id
+    WHERE tick.business=${BUSINESS} AND tick.business_date=${yesterday.toISOString().slice(0, 10)}::date AND tick.undone_at IS NULL
+      AND item.checklist_id=${lastList}::uuid AND item.count_key=ANY(${carryKeys}::text[])
+    ORDER BY item.count_key,tick.checked_at DESC` : [];
   return {
     businessDate: today,
     lists: lists.map((list) => ({
       id: String(list.id), name: String(list.name), opensAtHour: Number(list.opens_at_hour),
       items: items.filter((item) => String(item.checklist_id) === String(list.id)).map((item) => {
         const tick = ticks.get(String(item.id));
+        const fields = fieldsOf(item.count_fields), key = String(item.count_key || "");
+        const night = String(list.id) === firstList ? closing.find((row) => String(row.count_key) === key) : undefined;
+        const carried = night ? carryOverOnHand(fields, countsOf(night.counts)) : {};
+        const plan = plans.get(key);
         return {
-          id: String(item.id), label: String(item.label), howTo: String(item.how_to || ""), video: youtubeEmbedUrl(item.video_url), countFields: fieldsOf(item.count_fields),
+          id: String(item.id), label: String(item.label), howTo: String(item.how_to || ""), video: youtubeEmbedUrl(item.video_url), countFields: fields,
           check: tick ? { id: tick.id, employeeName: tick.employeeName, checkedAt: tick.checkedAt, counts: tick.counts ?? null } : null,
+          prefill: night && Object.keys(carried).length ? { counts: carried, by: String(night.employee_name), at: toIsoTimestampOrEmpty(night.checked_at) } : null,
+          plan: plan && countGrid(fields) && String(list.id) !== lastList ? plan : null,
         };
       }),
     })),
@@ -100,6 +120,25 @@ export async function checklistScreen(now = new Date()) {
     batches: batches.map(toBatch),
     fryers,
   };
+}
+
+/** "Make today" settings per counted thing (pizza dough), by count_key. */
+async function countPlans() {
+  const rows = await getSql()`SELECT count_key,minimums,leftover_size FROM store_count_plans WHERE business=${BUSINESS}`;
+  return new Map(rows.map((row) => [String(row.count_key), {
+    minimums: (typeof row.minimums === "string" ? JSON.parse(row.minimums) : row.minimums || {}) as Record<string, number>,
+    leftoverSize: String(row.leftover_size || ""),
+  }]));
+}
+
+/** Saves a counted thing's minimums by size and which size takes the rest of the batch. */
+export async function saveCountPlan(countKey: string, input: { minimums?: unknown; leftoverSize?: unknown }, actor: string) {
+  const sizes = [...new Set((await getSql()`SELECT count_fields FROM store_checklist_items WHERE business=${BUSINESS} AND count_key=${countKey} AND archived_at IS NULL`)
+    .flatMap((row) => countGrid(fieldsOf(row.count_fields))?.sizes || []))];
+  if (!sizes.length) throw new Error("That count has no sizes.");
+  const plan = parsePlan(sizes, input);
+  await getSql()`INSERT INTO store_count_plans(business,count_key,minimums,leftover_size,updated_by) VALUES(${BUSINESS},${countKey},${JSON.stringify(plan.minimums)}::jsonb,${plan.leftoverSize},${actor})
+    ON CONFLICT (business,count_key) DO UPDATE SET minimums=EXCLUDED.minimums,leftover_size=EXCLUDED.leftover_size,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;
 }
 
 /** Each fryer with its last oil change (on the screen: only fryers that are on). */
@@ -206,7 +245,7 @@ export async function checklistSetup() {
   const sql = getSql();
   const [lists, items, salads, fryers] = await Promise.all([
     sql`SELECT id,name,position,opens_at_hour,archived_at FROM store_checklists WHERE business=${BUSINESS} ORDER BY position,created_at`,
-    sql`SELECT id,checklist_id,label,position,placeholder,archived_at,how_to,video_url,count_fields FROM store_checklist_items WHERE business=${BUSINESS} ORDER BY position,created_at`,
+    sql`SELECT id,checklist_id,label,position,placeholder,archived_at,how_to,video_url,count_fields,count_key FROM store_checklist_items WHERE business=${BUSINESS} ORDER BY position,created_at`,
     sql`SELECT id,name,position,placeholder,archived_at,good_for_days FROM deli_salads WHERE business=${BUSINESS} ORDER BY position,created_at`,
     sql`SELECT id,name,position,archived_at FROM store_fryers WHERE business=${BUSINESS} ORDER BY position,created_at`,
   ]);
@@ -215,11 +254,12 @@ export async function checklistSetup() {
       id: String(list.id), name: String(list.name), opensAtHour: Number(list.opens_at_hour), active: !list.archived_at,
       items: items.filter((item) => String(item.checklist_id) === String(list.id)).map((item) => ({
         id: String(item.id), label: String(item.label), placeholder: Boolean(item.placeholder), active: !item.archived_at,
-        howTo: String(item.how_to || ""), videoUrl: String(item.video_url || ""), countFields: fieldsOf(item.count_fields),
+        howTo: String(item.how_to || ""), videoUrl: String(item.video_url || ""), countFields: fieldsOf(item.count_fields), countKey: String(item.count_key || ""),
       })),
     })),
     salads: salads.map((salad) => ({ id: String(salad.id), name: String(salad.name), placeholder: Boolean(salad.placeholder), active: !salad.archived_at, goodForDays: salad.good_for_days == null ? null : Number(salad.good_for_days) })),
     fryers: fryers.map((fryer) => ({ id: String(fryer.id), name: String(fryer.name), active: !fryer.archived_at })),
+    plans: Object.fromEntries(await countPlans()),
     limits: CHECKLIST_LIMITS,
   };
 }
