@@ -284,3 +284,11 @@ test("checklists: 0054 turns all three dough counts into the size grid", () => {
   assert.match(migration, /'Jumbo · On hand', 'Jumbo · ' \|\| made\.label, 'Thick · On hand', 'Thick · ' \|\| made\.label/);
   assert.match(migration, /count_key = 'pizza-dough'/);
 });
+
+test("checklists: 0055 gives Macaroni, Potato and Cole Slaw 3 days, leaving manager settings alone", () => {
+  const migration = readFileSync("db/migrations/0055_salad_three_day_limit.sql", "utf8");
+  assert.match(migration, /good_for_days = 3[\s\S]*name IN \('Macaroni', 'Potato', 'Cole Slaw'\) AND good_for_days IS NULL/);
+  // Made Monday: Wednesday is the last good day, Thursday is past.
+  assert.equal(saladFreshness("2026-11-09T15:00:00Z", 3, new Date("2026-11-11T15:00:00Z")), "last");
+  assert.equal(saladFreshness("2026-11-09T15:00:00Z", 3, new Date("2026-11-12T05:30:00Z")), "past");
+});
