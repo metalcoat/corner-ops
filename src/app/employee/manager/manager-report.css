@@ -33,3 +33,4 @@
 .ckLastGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
 .ckLastGrid article{display:grid;gap:2px;padding:10px 12px;border:1px solid var(--mgr-line);border-radius:10px;background:var(--mgr-panel)}
 .ckLastGrid article.fryer{border-color:#7c5a1e}.ckLastGrid span{font-size:.85rem}.ckLastGrid b{color:#fcd34d;font-weight:700}.ckLastGrid small{color:var(--mgr-muted)}
+.ckCaseHistory{overflow-x:auto}

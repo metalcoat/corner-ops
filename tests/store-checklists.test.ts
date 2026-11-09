@@ -4,7 +4,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
   businessHour, cleanVideoUrl, decodeWorker, defaultChecklistId, encodeWorker, hourLabel, parseCountFields, parseCounts, parseOpensAtHour,
-  summarizeChecklistDay, summarizeCounts, tallyByEmployee, youtubeEmbedUrl, agoLabel, whenLabel,
+  summarizeChecklistDay, summarizeCounts, tallyByEmployee, youtubeEmbedUrl, agoLabel, whenLabel, ageLabel, daysOld, madeLabel, parseGoodForDays, saladFreshness,
   type HistoryCheck,
 } from "../src/lib/store-checklist-rules";
 import { businessDayBoundary } from "../src/lib/business-day";
@@ -208,4 +208,32 @@ test("checklists: 0052 seeds two fryers once and finalizes the last two placehol
   assert.match(migration, /WHERE NOT EXISTS \(SELECT 1 FROM store_fryers WHERE business = 'Corner Deli'\)/);
   assert.match(migration, /label = 'Stock containers and lids'/);
   assert.match(migration, /directions on the back of the bag/);
+});
+
+test("checklists: salads in the case show made, age and freshness by store day", () => {
+  // Mon 2026-11-09 9:00 AM Eastern.
+  const now = new Date("2026-11-09T14:00:00Z");
+  assert.equal(madeLabel("2026-11-08T15:42:00Z"), "Sun 11/8 10:42 AM");
+  // Made 11 PM last night: one store day old this morning.
+  assert.equal(daysOld("2026-11-09T04:00:00Z", now), 1);
+  assert.equal(ageLabel("2026-11-09T13:00:00Z", now), "Today");
+  assert.equal(ageLabel("2026-11-08T15:00:00Z", now), "1 day");
+  assert.equal(ageLabel("2026-11-06T15:00:00Z", now), "3 days");
+  // Good for 3 days: made Sat (day 1), Sun (2), Mon is the last day, Tue is past.
+  assert.equal(saladFreshness("2026-11-07T15:00:00Z", 3, now), "last");
+  assert.equal(saladFreshness("2026-11-06T15:00:00Z", 3, now), "past");
+  assert.equal(saladFreshness("2026-11-08T15:00:00Z", 3, now), "ok");
+  assert.equal(saladFreshness("2026-11-09T13:00:00Z", 1, now), "last");
+  assert.equal(saladFreshness("2026-11-06T15:00:00Z", null, now), null);
+  assert.equal(parseGoodForDays(""), null);
+  assert.equal(parseGoodForDays("4"), 4);
+  assert.throws(() => parseGoodForDays("0"), /1 to 30/);
+  assert.throws(() => parseGoodForDays("2.5"), /1 to 30/);
+});
+
+test("checklists: 0053 adds good-for days and renames the fryers in place", () => {
+  const migration = readFileSync("db/migrations/0053_salad_good_for_days.sql", "utf8");
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS good_for_days integer/);
+  assert.match(migration, /SET name = 'Left fryer'.*name = 'Fryer 1'/);
+  assert.match(migration, /SET name = 'Right fryer'.*name = 'Fryer 2'/);
 });

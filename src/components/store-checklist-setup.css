@@ -28,3 +28,4 @@
 .ckSetup textarea{box-sizing:border-box;width:100%;padding:6px 10px;border:1px solid color-mix(in srgb,currentColor 35%,transparent);border-radius:8px;background:transparent;color:inherit;font:inherit}
 .ckSetupItem button{justify-self:start}
 .ckSetup.ckSetup label{grid-template-columns:none;padding:0;border-bottom:0}
+.ckSetup.ckSetup label.ckGoodFor{display:flex;align-items:center;gap:6px}.ckGoodFor span{font-size:.82rem;opacity:.8}

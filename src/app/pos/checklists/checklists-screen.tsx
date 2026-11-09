@@ -3,12 +3,13 @@
 // that person. Built to stay out of the way: one tap per job, and "Mark the rest done" for the end of the night.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { agoLabel, defaultChecklistId, whenLabel } from "@/lib/store-checklist-rules";
+import SaladCaseTable from "@/components/salad-case-table";
 
 type Check = { id: number; employeeName: string; checkedAt: string; counts: Record<string, number> | null };
 type Item = { id: string; label: string; howTo: string; video: string | null; countFields: string[]; check: Check | null };
 type List = { id: string; name: string; opensAtHour: number; items: Item[] };
 type Last = { at: string; by: string } | null;
-type Salad = { id: string; name: string; last: Last };
+type Salad = { id: string; name: string; last: Last; goodForDays: number | null };
 type Fryer = { id: string; name: string; last: (Last & { id: number }) | null };
 type OilChange = { id: number; fryerName: string; employeeName: string; changedAt: string };
 type Batch = { id: number; businessDate: string; saladId: string; saladName: string; employeeName: string; madeAt: string; batchSize: string; notes: string };
@@ -42,6 +43,8 @@ export default function ChecklistsScreen() {
   const [confirmAll, setConfirmAll] = useState<List | null>(null);
   const [logged, setLogged] = useState<Batch | null>(null);
   const [oiled, setOiled] = useState<OilChange | null>(null);
+  // Narrow screens fold the salads table to one line; wide screens always show it beside the lists.
+  const [caseOpen, setCaseOpen] = useState(true);
   const [counting, setCounting] = useState<Item | null>(null);
   const [openHow, setOpenHow] = useState<string>("");
   const [video, setVideo] = useState<{ title: string; src: string } | null>(null);
@@ -139,6 +142,17 @@ export default function ChecklistsScreen() {
 
   return (
     <main className="checklistScreen">
+      <aside className={caseOpen ? "ckCase" : "ckCase folded"} aria-label="Salads in the case">
+        <button type="button" className="ckCaseToggle" aria-expanded={caseOpen} onClick={() => setCaseOpen((open) => !open)}>
+          Salads in the case <span aria-hidden>{caseOpen ? "▴" : "▾"}</span>
+        </button>
+        <h2>Salads in the case</h2>
+        <div className="ckCaseBody">
+          <SaladCaseTable now={now} salads={screen.salads.map((salad) => ({ name: salad.name, at: salad.last?.at ?? null, by: salad.last?.by ?? null, goodForDays: salad.goodForDays }))}
+            fryers={screen.fryers.map((fryer) => ({ name: fryer.name, at: fryer.last?.at ?? null, by: fryer.last?.by ?? null }))} />
+        </div>
+      </aside>
+      <div className="ckMain">
       <header className="ckHeader">
         <div>
           <p>CORNER DELI</p>
@@ -246,6 +260,8 @@ export default function ChecklistsScreen() {
           </ul>
         </section>
       )}
+
+      </div>
 
       {counting && <CountDialog item={counting} onCancel={() => setCounting(null)} onSave={(counts) => { const item = counting; setCounting(null); void run({ action: "check", itemIds: [item.id], counts }); }} />}
 

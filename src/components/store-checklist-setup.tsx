@@ -8,7 +8,7 @@ import "./store-checklist-setup.css";
 type Entry = { id: string; placeholder?: boolean; active: boolean };
 type Item = Entry & { label: string; howTo: string; videoUrl: string; countFields: string[] };
 type List = Entry & { name: string; opensAtHour: number; items: Item[] };
-type Salad = Entry & { name: string };
+type Salad = Entry & { name: string; goodForDays: number | null };
 type Fryer = Entry & { name: string };
 type Setup = { lists: List[]; salads: Salad[]; fryers: Fryer[] };
 type Kind = "list" | "item" | "salad" | "fryer";
@@ -80,12 +80,17 @@ export default function StoreChecklistSetup() {
         <Adder placeholder="New list, e.g. Shift change" onAdd={(name) => send("PUT", { kind: "list", name, opensAtHour: 12 }, "List added. Open it to add jobs.")} />
 
         <h3>Deli salads</h3>
-        <p className="ckSetupHint">One button each on the screen. Staff tap it when they make a fresh batch.</p>
+        <p className="ckSetupHint">One button each on the screen. Staff tap it when they make a fresh batch. “Good for” turns the salad amber in the “Salads in the case” table on its last good day (the day it was made counts as day 1) and red after.</p>
         <ol>
           {setup.salads.map((salad, index) => (
             <Row key={salad.id} text={salad.name} entry={salad} first={index === 0} last={index === setup.salads.length - 1}
               onMove={(direction) => move("salad", salad.id, direction)}
-              onSave={(change) => void send("PUT", { kind: "salad", id: salad.id, name: salad.name, active: salad.active, ...change }, "Saved.")} />
+              onSave={(change) => void send("PUT", { kind: "salad", id: salad.id, name: salad.name, active: salad.active, ...change }, "Saved.")}
+              extra={<label className="ckGoodFor"><span>Good for</span>
+                <select value={salad.goodForDays ?? ""} onChange={(event) => void send("PUT", { kind: "salad", id: salad.id, name: salad.name, active: salad.active, goodForDays: event.target.value }, event.target.value ? `${salad.name}: good for ${event.target.value} ${event.target.value === "1" ? "day" : "days"}.` : `${salad.name}: no limit.`)}>
+                  <option value="">no limit</option>
+                  {Array.from({ length: 14 }, (_, index) => index + 1).map((days) => <option key={days} value={days}>{days} {days === 1 ? "day" : "days"}</option>)}
+                </select></label>} />
           ))}
         </ol>
         <Adder placeholder="Add a salad, e.g. Egg salad" onAdd={(name) => send("PUT", { kind: "salad", name }, "Added.")} />
@@ -166,7 +171,7 @@ function ItemRow({ item, listId, lists, first, last, onMove, onSave }: {
   );
 }
 
-function Row({ text, entry, first, last, onMove, onSave }: { text: string; entry: Entry; first: boolean; last: boolean; onMove: (direction: "up" | "down") => void; onSave: (change: { name?: string; active?: boolean }) => void }) {
+function Row({ text, entry, first, last, onMove, onSave, extra }: { text: string; entry: Entry; first: boolean; last: boolean; onMove: (direction: "up" | "down") => void; onSave: (change: { name?: string; active?: boolean }) => void; extra?: React.ReactNode }) {
   const [value, setValue] = useState(text);
   useEffect(() => setValue(text), [text]);
   return (
@@ -180,6 +185,7 @@ function Row({ text, entry, first, last, onMove, onSave }: { text: string; entry
         <button type="button" aria-label="Move down" disabled={last} onClick={() => onMove("down")}>↓</button>
         <button type="button" onClick={() => onSave({ active: !entry.active })}>{entry.active ? "Off" : "On"}</button>
       </span>
+      {extra}
     </li>
   );
 }

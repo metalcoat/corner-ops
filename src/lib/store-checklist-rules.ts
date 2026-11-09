@@ -212,3 +212,39 @@ export function agoLabel(iso: string, now = new Date()): string {
   const days = Math.floor(hours / 24);
   return `${days} ${days === 1 ? "day" : "days"} ago`;
 }
+
+const storeDay = (at: Date) => at.toLocaleDateString("en-CA", { timeZone: STORE_TIME_ZONE });
+/** Whole store calendar days from one moment to another (made yesterday evening = 1 day this morning). */
+export function daysOld(iso: string, now = new Date()): number {
+  return Math.max(0, Math.round((Date.parse(`${storeDay(now)}T12:00:00Z`) - Date.parse(`${storeDay(new Date(iso))}T12:00:00Z`)) / 86_400_000));
+}
+
+/** "Sun 11/8 10:42 AM" */
+export function madeLabel(iso: string): string {
+  const at = new Date(iso);
+  const part = (options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("en-US", { timeZone: STORE_TIME_ZONE, ...options }).format(at);
+  return `${part({ weekday: "short" })} ${part({ month: "numeric", day: "numeric" })} ${part({ hour: "numeric", minute: "2-digit" })}`;
+}
+
+/** "Today", "1 day", "3 days" */
+export function ageLabel(iso: string, now = new Date()): string {
+  const days = daysOld(iso, now);
+  return days === 0 ? "Today" : `${days} ${days === 1 ? "day" : "days"}`;
+}
+
+/**
+ * A salad good for N days (made counts as day 1): "last" on its last good day, "past" after it, otherwise "ok".
+ * No setting = no highlight.
+ */
+export function saladFreshness(iso: string, goodForDays: number | null | undefined, now = new Date()): "ok" | "last" | "past" | null {
+  if (!goodForDays) return null;
+  const days = daysOld(iso, now);
+  return days >= goodForDays ? "past" : days === goodForDays - 1 ? "last" : "ok";
+}
+
+export function parseGoodForDays(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const days = Number(value);
+  if (!Number.isInteger(days) || days < 1 || days > 30) throw new Error("Good for: pick 1 to 30 days, or leave it empty.");
+  return days;
+}

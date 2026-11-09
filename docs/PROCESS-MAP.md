@@ -730,7 +730,7 @@ flowchart LR
 - Lists start over each 4 AM business day (`businessDateOf`). Tables `store_checklists`, `store_checklist_items`,
   `store_checklist_checks`, `deli_salads`, `deli_salad_batches` (migration 0049, which also seeds placeholder jobs;
   0050 sets the real salads Chris gave 2026-11-09: Macaroni, Potato, Pasta, Green Bean, Brown Bean, Cole Slaw,
-  Antipasto; **apply 0049–0052 on production at the switchover**). Code: `src/lib/store-checklists.ts`,
+  Antipasto; **apply 0049–0053 on production at the switchover**). Code: `src/lib/store-checklists.ts`,
   pure rules `src/lib/store-checklist-rules.ts` (tests `tests/store-checklists.test.ts`).
 - Jobs (migration 0051, Chris's real lists 2026-11-09: Opening/prep 44, Mid-day 5, Closing 15; two marked placeholder
   until Chris confirms them) can carry a how-to note (a small "How?" button opens it without ticking the job), a
@@ -744,7 +744,12 @@ flowchart LR
   `store_fryers`, oil changes in `store_fryer_oil_changes` (migration 0052, seeds Fryer 1 and Fryer 2; it also
   finalizes the last two placeholder jobs). The manager history shows the same "last made / last changed" cards and
   the oil log for the period.
-- Managers edit lists (name, start time), fryers, jobs (wording, order, which list, how-to, video, counts, on/off) and salads in POS Settings (overview) or the manager portal
+- "Salads in the case" table, always on screen (a side panel on wide screens, a fold-away strip on top on narrow
+  ones; `src/components/salad-case-table.tsx`): per salad when the current batch was made, its age and who made it,
+  plus the Left/Right fryer's last oil change. A salad's optional "good for N days" (`deli_salads.good_for_days`,
+  migration 0053, which also renames Fryer 1/2 to Left/Right fryer) turns its row amber on the last good day (made
+  day = day 1) and red after. The manager history shows the same table.
+- Managers edit lists (name, start time), fryers, salads (good for N days), jobs (wording, order, which list, how-to, video, counts, on/off) and salads in POS Settings (overview) or the manager portal
   (`/employee/manager?tab=checklists` → Edit lists & salads); `GET/PUT/PATCH /api/employee/manager-report/checklists/setup`.
   Switching off keeps history. History: manager portal → Checklists & salads (day/week/month): each job with who and
   when, missed jobs, un-checks, salad batches filtered by salad or person, and a by-person tally
@@ -867,5 +872,5 @@ flowchart LR
 5. Missed-call alerts read `rezku_shifts` to know who is on shift — move to the new clock.
 6. Staff re-enable notifications on team.ordercornerdeli.com (old Vercel installs).
 7. Rezku menu capture workflow fails on the runner (needs sudo for browser deps); retire with Rezku.
-8. Store checklists (§8d-1): apply migrations 0049–0052 on production.
+8. Store checklists (§8d-1): apply migrations 0049–0053 on production.
 9. MX: questions to MX support (terminal model, fees, receipts, PIN debit tips, can the Dejavoo Z6 read our own gift card stripes for the POS) before ordering hardware.

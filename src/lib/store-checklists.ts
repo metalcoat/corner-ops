@@ -1,4 +1,4 @@
-// Store checklists, the deli salad log and the fryer oil log (db/migrations/0049–0052). The in-store screen (/pos/checklists) ticks
+// Store checklists, the deli salad log and the fryer oil log (db/migrations/0049–0053). The in-store screen (/pos/checklists) ticks
 // items and logs salad batches as whoever last typed their PIN there; managers edit the lists in POS Settings or
 // the manager portal and read the history in the manager portal. Lists start over each 4 AM business day.
 import { getSql, withTransaction } from "@/lib/db";
@@ -7,7 +7,7 @@ import { businessDateOf } from "@/lib/ordering-registers";
 import { constantTimeEqual, hmacSignature } from "@/lib/security-keys";
 import { toIsoTimestamp, toIsoTimestampOrEmpty } from "@/lib/timestamp-values";
 import {
-  CHECKLIST_LIMITS, CHECKLIST_WORKER_IDLE_MS, cleanText, cleanVideoUrl, decodeWorker, encodeWorker, parseCountFields, parseCounts, parseOpensAtHour,
+  CHECKLIST_LIMITS, CHECKLIST_WORKER_IDLE_MS, cleanText, cleanVideoUrl, decodeWorker, encodeWorker, parseCountFields, parseCounts, parseGoodForDays, parseOpensAtHour,
   summarizeChecklistDay, summarizeCounts, tallyByEmployee, youtubeEmbedUrl,
   type ChecklistWorker, type HistoryCheck, type HistoryItem, type HistoryList,
 } from "@/lib/store-checklist-rules";
@@ -74,7 +74,7 @@ export async function checklistScreen(now = new Date()) {
     sql`SELECT item.id,item.checklist_id,item.label,item.position,item.how_to,item.video_url,item.count_fields FROM store_checklist_items item JOIN store_checklists list ON list.id=item.checklist_id
         WHERE item.business=${BUSINESS} AND item.archived_at IS NULL AND list.archived_at IS NULL ORDER BY item.position,item.created_at`,
     sql`SELECT * FROM store_checklist_checks WHERE business=${BUSINESS} AND business_date=${today} AND undone_at IS NULL`,
-    sql`SELECT salad.id,salad.name,last.made_at,last.employee_name FROM deli_salads salad
+    sql`SELECT salad.id,salad.name,salad.good_for_days,last.made_at,last.employee_name FROM deli_salads salad
         LEFT JOIN LATERAL (SELECT made_at,employee_name FROM deli_salad_batches WHERE salad_id=salad.id AND voided_at IS NULL ORDER BY made_at DESC LIMIT 1) last ON TRUE
         WHERE salad.business=${BUSINESS} AND salad.archived_at IS NULL ORDER BY salad.position,salad.created_at`,
     sql`SELECT * FROM deli_salad_batches WHERE business=${BUSINESS} AND business_date>=${since.toISOString().slice(0, 10)} AND voided_at IS NULL ORDER BY made_at DESC LIMIT 60`,
@@ -93,7 +93,10 @@ export async function checklistScreen(now = new Date()) {
         };
       }),
     })),
-    salads: salads.map((salad) => ({ id: String(salad.id), name: String(salad.name), last: salad.made_at ? { at: toIsoTimestampOrEmpty(salad.made_at), by: String(salad.employee_name) } : null })),
+    salads: salads.map((salad) => ({
+      id: String(salad.id), name: String(salad.name), goodForDays: salad.good_for_days == null ? null : Number(salad.good_for_days),
+      last: salad.made_at ? { at: toIsoTimestampOrEmpty(salad.made_at), by: String(salad.employee_name) } : null,
+    })),
     batches: batches.map(toBatch),
     fryers,
   };
@@ -204,7 +207,7 @@ export async function checklistSetup() {
   const [lists, items, salads, fryers] = await Promise.all([
     sql`SELECT id,name,position,opens_at_hour,archived_at FROM store_checklists WHERE business=${BUSINESS} ORDER BY position,created_at`,
     sql`SELECT id,checklist_id,label,position,placeholder,archived_at,how_to,video_url,count_fields FROM store_checklist_items WHERE business=${BUSINESS} ORDER BY position,created_at`,
-    sql`SELECT id,name,position,placeholder,archived_at FROM deli_salads WHERE business=${BUSINESS} ORDER BY position,created_at`,
+    sql`SELECT id,name,position,placeholder,archived_at,good_for_days FROM deli_salads WHERE business=${BUSINESS} ORDER BY position,created_at`,
     sql`SELECT id,name,position,archived_at FROM store_fryers WHERE business=${BUSINESS} ORDER BY position,created_at`,
   ]);
   return {
@@ -215,7 +218,7 @@ export async function checklistSetup() {
         howTo: String(item.how_to || ""), videoUrl: String(item.video_url || ""), countFields: fieldsOf(item.count_fields),
       })),
     })),
-    salads: salads.map((salad) => ({ id: String(salad.id), name: String(salad.name), placeholder: Boolean(salad.placeholder), active: !salad.archived_at })),
+    salads: salads.map((salad) => ({ id: String(salad.id), name: String(salad.name), placeholder: Boolean(salad.placeholder), active: !salad.archived_at, goodForDays: salad.good_for_days == null ? null : Number(salad.good_for_days) })),
     fryers: fryers.map((fryer) => ({ id: String(fryer.id), name: String(fryer.name), active: !fryer.archived_at })),
     limits: CHECKLIST_LIMITS,
   };
@@ -229,7 +232,7 @@ const countKeyFor = (label: string) => label.toLowerCase().replace(/\s+count$/, 
  */
 export async function saveSetupEntry(input: {
   kind?: unknown; id?: unknown; name?: unknown; checklistId?: unknown; active?: unknown; opensAtHour?: unknown;
-  howTo?: unknown; videoUrl?: unknown; countFields?: unknown;
+  howTo?: unknown; videoUrl?: unknown; countFields?: unknown; goodForDays?: unknown;
 }, actor: string) {
   const kind = input.kind as SetupKind;
   if (!["list", "item", "salad", "fryer"].includes(kind)) throw new Error("Unknown kind.");
@@ -295,7 +298,9 @@ export async function saveSetupEntry(input: {
       return;
     }
     if (id) {
-      const rows = await sql`UPDATE deli_salads SET placeholder=placeholder AND name=${name},name=${name},archived_at=CASE WHEN ${active}::boolean THEN NULL ELSE COALESCE(archived_at,NOW()) END,updated_by=${actor},updated_at=NOW() WHERE id=${id}::uuid AND business=${BUSINESS} RETURNING id`;
+      const goodFor = input.goodForDays === undefined ? undefined : parseGoodForDays(input.goodForDays);
+      const rows = await sql`UPDATE deli_salads SET placeholder=placeholder AND name=${name},name=${name},
+        good_for_days=CASE WHEN ${goodFor === undefined}::boolean THEN good_for_days ELSE ${goodFor ?? null}::int END,archived_at=CASE WHEN ${active}::boolean THEN NULL ELSE COALESCE(archived_at,NOW()) END,updated_by=${actor},updated_at=NOW() WHERE id=${id}::uuid AND business=${BUSINESS} RETURNING id`;
       if (!rows.length) throw new Error("That salad no longer exists.");
       return;
     }
@@ -344,8 +349,8 @@ export async function checklistHistory(range: { start: string; end: string }) {
     sql`SELECT * FROM store_checklist_checks WHERE business=${BUSINESS} AND business_date BETWEEN ${range.start}::date AND ${range.end}::date ORDER BY checked_at`,
     sql`SELECT * FROM deli_salad_batches WHERE business=${BUSINESS} AND business_date BETWEEN ${range.start}::date AND ${range.end}::date ORDER BY made_at DESC`,
     sql`SELECT * FROM store_fryer_oil_changes WHERE business=${BUSINESS} AND business_date BETWEEN ${range.start}::date AND ${range.end}::date ORDER BY changed_at DESC`,
-    lastOilChanges(false),
-    sql`SELECT salad.name,salad.archived_at,last.made_at,last.employee_name FROM deli_salads salad
+    lastOilChanges(true),
+    sql`SELECT salad.name,salad.archived_at,salad.good_for_days,last.made_at,last.employee_name FROM deli_salads salad
         LEFT JOIN LATERAL (SELECT made_at,employee_name FROM deli_salad_batches WHERE salad_id=salad.id AND voided_at IS NULL ORDER BY made_at DESC LIMIT 1) last ON TRUE
         WHERE salad.business=${BUSINESS} AND (salad.archived_at IS NULL OR last.made_at IS NOT NULL) ORDER BY salad.position,salad.created_at`,
   ]);
@@ -376,7 +381,10 @@ export async function checklistHistory(range: { start: string; end: string }) {
   }));
   // Latest salad batch and oil change ever, whatever period is open, so "when was it last done" is always there.
   const lastDone = {
-    salads: salads.map((row) => ({ name: String(row.name), at: row.made_at ? toIsoTimestampOrEmpty(row.made_at) : null, by: row.employee_name ? String(row.employee_name) : null })),
+    salads: salads.filter((row) => !row.archived_at).map((row) => ({
+      name: String(row.name), at: row.made_at ? toIsoTimestampOrEmpty(row.made_at) : null, by: row.employee_name ? String(row.employee_name) : null,
+      goodForDays: row.good_for_days == null ? null : Number(row.good_for_days),
+    })),
     fryers: fryers.map((fryer) => ({ name: fryer.name, at: fryer.last?.at ?? null, by: fryer.last?.by ?? null })),
   };
   return { today, start: range.start, end: range.end, days, oilChanges, lastDone, people: tallyByEmployee(allChecks, allBatches) };
