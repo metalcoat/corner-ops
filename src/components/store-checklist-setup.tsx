@@ -45,9 +45,9 @@ export default function StoreChecklistSetup() {
   }
   const move = (kind: Kind, id: string, direction: "up" | "down") => void send("PATCH", { kind, id, direction }, "Moved.");
 
-  if (!setup) return <section className="ckSetup"><h2>Checklists &amp; deli salads</h2><p role={message ? "alert" : undefined}>{message || "Loading…"}</p></section>;
+  if (!setup) return <section className="posSettingsCard ckSetup"><h2>Checklists &amp; deli salads</h2><p role={message ? "alert" : undefined}>{message || "Loading…"}</p></section>;
   return (
-    <section className="ckSetup">
+    <section className="posSettingsCard ckSetup">
       <h2>Checklists &amp; deli salads</h2>
       <p className="ckSetupHint">
         What shows on the deli&apos;s checklist screen (<a href="/pos/checklists">/pos/checklists</a>). Lists start over at 4 AM each day.

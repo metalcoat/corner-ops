@@ -14,7 +14,7 @@ html:has(.checklistScreen),body:has(.checklistScreen){background:#0d1310}
 .ckTabs{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
 .ckTabs button{display:grid;gap:2px;min-height:76px;padding:10px 14px;border:2px solid var(--ck-line);border-radius:14px;background:var(--ck-panel);text-align:left}
 .ckTabs button strong{font-size:1.25em}.ckTabs button small{color:var(--ck-muted);font-weight:700}
-.ckTabs button.active{border-color:#8fd0a2;background:#22332a}
+.checklistScreen .ckTabs button.active{border:3px solid #8fd0a2;background:#24553e;box-shadow:0 0 0 2px #8fd0a233}
 .ckTabs button.complete small{color:#86efac}
 .ckError{padding:12px 14px;border-radius:12px;background:#4a1f1a;color:#ffd6cf;font-weight:750}
 .ckEmpty,.ckHint{color:var(--ck-muted);font-size:1.05em}

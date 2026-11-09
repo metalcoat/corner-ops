@@ -251,11 +251,11 @@ export async function checklistHistory(range: { start: string; end: string }) {
     const day = cursor.toISOString().slice(0, 10);
     if (day > today) continue;
     const window = { start: businessDayBoundary(day), end: businessDayBoundary(day, true) };
-    days.push({
-      businessDate: day, finished: day < today,
-      lists: summarizeChecklistDay(historyLists, historyItems, allChecks.filter((check) => check.businessDate === day), window),
-      batches: allBatches.filter((batch) => batch.businessDate === day),
-    });
+    const dayLists = summarizeChecklistDay(historyLists, historyItems, allChecks.filter((check) => check.businessDate === day), window);
+    const dayBatches = allBatches.filter((batch) => batch.businessDate === day);
+    // Days before any list existed (or with everything switched off) say nothing; leave them out.
+    if (!dayLists.length && !dayBatches.length) continue;
+    days.push({ businessDate: day, finished: day < today, lists: dayLists, batches: dayBatches });
   }
   return { today, start: range.start, end: range.end, days, people: tallyByEmployee(allChecks, allBatches) };
 }
