@@ -3,7 +3,7 @@ import { authenticateDeliPosPin } from "@/lib/pos-auth";
 import { pinAttemptKeys } from "@/lib/pos-access-guard";
 import { currentScreen, screenSigner } from "@/lib/screen-auth";
 import {
-  checkItems, checklistScreen, confirmWorker, logSaladBatch, uncheckItem, updateSaladBatch, voidSaladBatch, workerFromPass, workerPass,
+  checkItems, checklistScreen, confirmWorker, logOilChange, logSaladBatch, voidOilChange, uncheckItem, updateSaladBatch, voidSaladBatch, workerFromPass, workerPass,
 } from "@/lib/store-checklists";
 
 export const runtime = "nodejs";
@@ -43,15 +43,17 @@ export async function POST(request: Request) {
   if (!pass) return isoJson({ error: "Type your PIN.", signedOut: true }, { status: 401 });
   try {
     const worker = await confirmWorker(pass);
-    let batch = null;
+    let batch = null, oil = null;
     if (body.action === "check") await checkItems(Array.isArray(body.itemIds) ? body.itemIds.map(String) : [], worker, body.bulk === true, body.counts);
     else if (body.action === "uncheck") await uncheckItem(String(body.itemId || ""), worker, body.reason);
     else if (body.action === "salad") batch = await logSaladBatch(String(body.saladId || ""), worker, { batchSize: body.batchSize, notes: body.notes });
     else if (body.action === "batch") batch = await updateSaladBatch(Number(body.id), { batchSize: body.batchSize, notes: body.notes });
     else if (body.action === "void-batch") await voidSaladBatch(Number(body.id), worker, body.reason);
+    else if (body.action === "oil") oil = await logOilChange(String(body.fryerId || ""), worker);
+    else if (body.action === "void-oil") await voidOilChange(Number(body.id), worker, body.reason);
     else return fail(new Error("Unknown action."));
     // Every tap keeps the same person signed in for another few minutes.
-    return isoJson({ ...workerPass({ employeeId: worker.employeeId, name: worker.name, role: worker.role }), batch, screen: await checklistScreen() });
+    return isoJson({ ...workerPass({ employeeId: worker.employeeId, name: worker.name, role: worker.role }), batch, oil, screen: await checklistScreen() });
   } catch (error) {
     return fail(error);
   }

@@ -1,4 +1,4 @@
-// Store checklists and the deli salad log (db/migrations/0049–0051). The in-store screen (/pos/checklists) ticks
+// Store checklists, the deli salad log and the fryer oil log (db/migrations/0049–0052). The in-store screen (/pos/checklists) ticks
 // items and logs salad batches as whoever last typed their PIN there; managers edit the lists in POS Settings or
 // the manager portal and read the history in the manager portal. Lists start over each 4 AM business day.
 import { getSql, withTransaction } from "@/lib/db";
@@ -69,13 +69,16 @@ export async function checklistScreen(now = new Date()) {
   const today = businessDateOf(now);
   const since = new Date(`${today}T12:00:00Z`);
   since.setUTCDate(since.getUTCDate() - 3);
-  const [lists, items, checks, salads, batches] = await Promise.all([
+  const [lists, items, checks, salads, batches, fryers] = await Promise.all([
     sql`SELECT id,name,position,opens_at_hour FROM store_checklists WHERE business=${BUSINESS} AND archived_at IS NULL ORDER BY position,created_at`,
     sql`SELECT item.id,item.checklist_id,item.label,item.position,item.how_to,item.video_url,item.count_fields FROM store_checklist_items item JOIN store_checklists list ON list.id=item.checklist_id
         WHERE item.business=${BUSINESS} AND item.archived_at IS NULL AND list.archived_at IS NULL ORDER BY item.position,item.created_at`,
     sql`SELECT * FROM store_checklist_checks WHERE business=${BUSINESS} AND business_date=${today} AND undone_at IS NULL`,
-    sql`SELECT id,name FROM deli_salads WHERE business=${BUSINESS} AND archived_at IS NULL ORDER BY position,created_at`,
+    sql`SELECT salad.id,salad.name,last.made_at,last.employee_name FROM deli_salads salad
+        LEFT JOIN LATERAL (SELECT made_at,employee_name FROM deli_salad_batches WHERE salad_id=salad.id AND voided_at IS NULL ORDER BY made_at DESC LIMIT 1) last ON TRUE
+        WHERE salad.business=${BUSINESS} AND salad.archived_at IS NULL ORDER BY salad.position,salad.created_at`,
     sql`SELECT * FROM deli_salad_batches WHERE business=${BUSINESS} AND business_date>=${since.toISOString().slice(0, 10)} AND voided_at IS NULL ORDER BY made_at DESC LIMIT 60`,
+    lastOilChanges(true),
   ]);
   const ticks = new Map(checks.map((row) => [String(row.item_id), toCheck(row)]));
   return {
@@ -90,9 +93,40 @@ export async function checklistScreen(now = new Date()) {
         };
       }),
     })),
-    salads: salads.map((salad) => ({ id: String(salad.id), name: String(salad.name) })),
+    salads: salads.map((salad) => ({ id: String(salad.id), name: String(salad.name), last: salad.made_at ? { at: toIsoTimestampOrEmpty(salad.made_at), by: String(salad.employee_name) } : null })),
     batches: batches.map(toBatch),
+    fryers,
   };
+}
+
+/** Each fryer with its last oil change (on the screen: only fryers that are on). */
+async function lastOilChanges(activeOnly: boolean) {
+  const rows = await getSql()`
+    SELECT fryer.id,fryer.name,fryer.archived_at,last.id change_id,last.changed_at,last.employee_name FROM store_fryers fryer
+    LEFT JOIN LATERAL (SELECT id,changed_at,employee_name FROM store_fryer_oil_changes WHERE fryer_id=fryer.id AND voided_at IS NULL ORDER BY changed_at DESC LIMIT 1) last ON TRUE
+    WHERE fryer.business=${BUSINESS} AND (NOT ${activeOnly}::boolean OR fryer.archived_at IS NULL) ORDER BY fryer.position,fryer.created_at`;
+  return rows.map((row) => ({
+    id: String(row.id), name: String(row.name),
+    last: row.changed_at ? { id: Number(row.change_id), at: toIsoTimestampOrEmpty(row.changed_at), by: String(row.employee_name) } : null,
+  }));
+}
+
+export async function logOilChange(fryerId: string, worker: ChecklistWorker) {
+  const row = (await getSql()`
+    INSERT INTO store_fryer_oil_changes(business,business_date,fryer_id,fryer_name,employee_id,employee_name)
+    SELECT ${BUSINESS}::text,${businessDateOf(new Date())}::date,fryer.id,fryer.name,${worker.employeeId}::text,${worker.name}::text
+    FROM store_fryers fryer WHERE fryer.id=${fryerId}::uuid AND fryer.business=${BUSINESS} AND fryer.archived_at IS NULL
+    RETURNING id,fryer_name,employee_name,changed_at`)[0];
+  if (!row) throw new Error("That fryer isn't on the list any more.");
+  return { id: Number(row.id), fryerName: String(row.fryer_name), employeeName: String(row.employee_name), changedAt: toIsoTimestampOrEmpty(row.changed_at) };
+}
+
+export async function voidOilChange(id: number, worker: ChecklistWorker, reason: unknown) {
+  const why = cleanText(reason, CHECKLIST_LIMITS.reasonChars) || "Tapped by mistake";
+  const rows = await getSql()`
+    UPDATE store_fryer_oil_changes SET voided_at=NOW(),voided_by_name=${worker.name},void_reason=${why}
+    WHERE id=${id} AND business=${BUSINESS} AND voided_at IS NULL AND changed_at>NOW()-INTERVAL '1 day' RETURNING id`;
+  if (!rows.length) throw new Error("That oil change can't be removed any more.");
 }
 
 /**
@@ -163,14 +197,15 @@ export async function voidSaladBatch(id: number, worker: ChecklistWorker, reason
 
 // ---- Manager setup ----
 
-export type SetupKind = "list" | "item" | "salad";
+export type SetupKind = "list" | "item" | "salad" | "fryer";
 
 export async function checklistSetup() {
   const sql = getSql();
-  const [lists, items, salads] = await Promise.all([
+  const [lists, items, salads, fryers] = await Promise.all([
     sql`SELECT id,name,position,opens_at_hour,archived_at FROM store_checklists WHERE business=${BUSINESS} ORDER BY position,created_at`,
     sql`SELECT id,checklist_id,label,position,placeholder,archived_at,how_to,video_url,count_fields FROM store_checklist_items WHERE business=${BUSINESS} ORDER BY position,created_at`,
     sql`SELECT id,name,position,placeholder,archived_at FROM deli_salads WHERE business=${BUSINESS} ORDER BY position,created_at`,
+    sql`SELECT id,name,position,archived_at FROM store_fryers WHERE business=${BUSINESS} ORDER BY position,created_at`,
   ]);
   return {
     lists: lists.map((list) => ({
@@ -181,6 +216,7 @@ export async function checklistSetup() {
       })),
     })),
     salads: salads.map((salad) => ({ id: String(salad.id), name: String(salad.name), placeholder: Boolean(salad.placeholder), active: !salad.archived_at })),
+    fryers: fryers.map((fryer) => ({ id: String(fryer.id), name: String(fryer.name), active: !fryer.archived_at })),
     limits: CHECKLIST_LIMITS,
   };
 }
@@ -196,7 +232,7 @@ export async function saveSetupEntry(input: {
   howTo?: unknown; videoUrl?: unknown; countFields?: unknown;
 }, actor: string) {
   const kind = input.kind as SetupKind;
-  if (!["list", "item", "salad"].includes(kind)) throw new Error("Unknown kind.");
+  if (!["list", "item", "salad", "fryer"].includes(kind)) throw new Error("Unknown kind.");
   const name = cleanText(input.name, CHECKLIST_LIMITS.labelChars);
   if (!name) throw new Error(kind === "item" ? "Write what needs doing." : "Give it a name.");
   const id = input.id ? String(input.id) : "";
@@ -247,6 +283,17 @@ export async function saveSetupEntry(input: {
         FROM store_checklist_items WHERE checklist_id=${listId}::uuid`;
       return;
     }
+    if (kind === "fryer") {
+      if (id) {
+        const rows = await sql`UPDATE store_fryers SET name=${name},archived_at=CASE WHEN ${active}::boolean THEN NULL ELSE COALESCE(archived_at,NOW()) END,updated_by=${actor},updated_at=NOW() WHERE id=${id}::uuid AND business=${BUSINESS} RETURNING id`;
+        if (!rows.length) throw new Error("That fryer no longer exists.");
+        return;
+      }
+      const count = Number((await sql`SELECT COUNT(*)::int n FROM store_fryers WHERE business=${BUSINESS} AND archived_at IS NULL`)[0].n);
+      if (count >= CHECKLIST_LIMITS.fryers) throw new Error(`At most ${CHECKLIST_LIMITS.fryers} fryers.`);
+      await sql`INSERT INTO store_fryers(business,name,position,updated_by) SELECT ${BUSINESS}::text,${name}::text,COALESCE(MAX(position),0)+10,${actor}::text FROM store_fryers WHERE business=${BUSINESS}`;
+      return;
+    }
     if (id) {
       const rows = await sql`UPDATE deli_salads SET placeholder=placeholder AND name=${name},name=${name},archived_at=CASE WHEN ${active}::boolean THEN NULL ELSE COALESCE(archived_at,NOW()) END,updated_by=${actor},updated_at=NOW() WHERE id=${id}::uuid AND business=${BUSINESS} RETURNING id`;
       if (!rows.length) throw new Error("That salad no longer exists.");
@@ -266,6 +313,8 @@ export async function moveSetupEntry(kind: SetupKind, id: string, direction: "up
       ? await sql`SELECT id,position FROM store_checklists WHERE business=${BUSINESS} ORDER BY position,created_at FOR UPDATE`
       : kind === "salad"
         ? await sql`SELECT id,position FROM deli_salads WHERE business=${BUSINESS} ORDER BY position,created_at FOR UPDATE`
+        : kind === "fryer"
+        ? await sql`SELECT id,position FROM store_fryers WHERE business=${BUSINESS} ORDER BY position,created_at FOR UPDATE`
         : await sql`SELECT id,position FROM store_checklist_items WHERE checklist_id=(SELECT checklist_id FROM store_checklist_items WHERE id=${id}::uuid) ORDER BY position,created_at FOR UPDATE`;
     const order = rows.map((row) => String(row.id));
     const at = order.indexOf(id);
@@ -277,6 +326,7 @@ export async function moveSetupEntry(kind: SetupKind, id: string, direction: "up
     for (const [index, rowId] of order.entries()) {
       const position = (index + 1) * 10;
       if (kind === "list") await sql`UPDATE store_checklists SET position=${position},updated_by=${actor},updated_at=NOW() WHERE id=${rowId}::uuid AND position<>${position}`;
+      else if (kind === "fryer") await sql`UPDATE store_fryers SET position=${position},updated_by=${actor},updated_at=NOW() WHERE id=${rowId}::uuid AND position<>${position}`;
       else if (kind === "salad") await sql`UPDATE deli_salads SET position=${position},updated_by=${actor},updated_at=NOW() WHERE id=${rowId}::uuid AND position<>${position}`;
       else await sql`UPDATE store_checklist_items SET position=${position},updated_by=${actor},updated_at=NOW() WHERE id=${rowId}::uuid AND position<>${position}`;
     }
@@ -288,11 +338,16 @@ export async function moveSetupEntry(kind: SetupKind, id: string, direction: "up
 /** Day-by-day checklists, salad batches and per-person tallies for start…end (business dates, inclusive). */
 export async function checklistHistory(range: { start: string; end: string }) {
   const sql = getSql();
-  const [lists, items, checks, batches] = await Promise.all([
+  const [lists, items, checks, batches, oil, fryers, salads] = await Promise.all([
     sql`SELECT id,name,position,created_at,archived_at FROM store_checklists WHERE business=${BUSINESS}`,
     sql`SELECT id,checklist_id,label,position,created_at,archived_at,count_fields,count_key FROM store_checklist_items WHERE business=${BUSINESS}`,
     sql`SELECT * FROM store_checklist_checks WHERE business=${BUSINESS} AND business_date BETWEEN ${range.start}::date AND ${range.end}::date ORDER BY checked_at`,
     sql`SELECT * FROM deli_salad_batches WHERE business=${BUSINESS} AND business_date BETWEEN ${range.start}::date AND ${range.end}::date ORDER BY made_at DESC`,
+    sql`SELECT * FROM store_fryer_oil_changes WHERE business=${BUSINESS} AND business_date BETWEEN ${range.start}::date AND ${range.end}::date ORDER BY changed_at DESC`,
+    lastOilChanges(false),
+    sql`SELECT salad.name,salad.archived_at,last.made_at,last.employee_name FROM deli_salads salad
+        LEFT JOIN LATERAL (SELECT made_at,employee_name FROM deli_salad_batches WHERE salad_id=salad.id AND voided_at IS NULL ORDER BY made_at DESC LIMIT 1) last ON TRUE
+        WHERE salad.business=${BUSINESS} AND (salad.archived_at IS NULL OR last.made_at IS NOT NULL) ORDER BY salad.position,salad.created_at`,
   ]);
   const historyLists: HistoryList[] = lists.map((row) => ({ id: String(row.id), name: String(row.name), position: Number(row.position), createdAt: toIsoTimestampOrEmpty(row.created_at), archivedAt: iso(row.archived_at) }));
   const historyItems: HistoryItem[] = items.map((row) => ({ id: String(row.id), checklistId: String(row.checklist_id), label: String(row.label), position: Number(row.position), createdAt: toIsoTimestampOrEmpty(row.created_at), archivedAt: iso(row.archived_at),
@@ -315,5 +370,14 @@ export async function checklistHistory(range: { start: string; end: string }) {
     const counts = summarizeCounts(historyLists, historyItems.filter((item) => shown.has(item.id)), dayChecks);
     days.push({ businessDate: day, finished: day < today, lists: dayLists, batches: dayBatches, counts });
   }
-  return { today, start: range.start, end: range.end, days, people: tallyByEmployee(allChecks, allBatches) };
+  const oilChanges = oil.map((row) => ({
+    id: Number(row.id), businessDate: date(row.business_date), fryerName: String(row.fryer_name), employeeName: String(row.employee_name),
+    changedAt: toIsoTimestampOrEmpty(row.changed_at), voidedAt: iso(row.voided_at), voidedByName: row.voided_by_name ? String(row.voided_by_name) : null, voidReason: row.void_reason ? String(row.void_reason) : null,
+  }));
+  // Latest salad batch and oil change ever, whatever period is open, so "when was it last done" is always there.
+  const lastDone = {
+    salads: salads.map((row) => ({ name: String(row.name), at: row.made_at ? toIsoTimestampOrEmpty(row.made_at) : null, by: row.employee_name ? String(row.employee_name) : null })),
+    fryers: fryers.map((fryer) => ({ name: fryer.name, at: fryer.last?.at ?? null, by: fryer.last?.by ?? null })),
+  };
+  return { today, start: range.start, end: range.end, days, oilChanges, lastDone, people: tallyByEmployee(allChecks, allBatches) };
 }

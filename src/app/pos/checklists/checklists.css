@@ -29,8 +29,13 @@ html:has(.checklistScreen),body:has(.checklistScreen){background:#0d1310}
 .ckItem.done{background:var(--ck-done);border-color:#2f6b43}.ckItem.done .ckBox{background:var(--ck-green);border-color:var(--ck-green);color:#fff}.ckItem.done strong{color:#d7e6da}
 .ckAll{justify-self:start;min-height:64px;padding:10px 22px;border:2px solid #8fd0a2;border-radius:14px;background:transparent;font-weight:850;font-size:1.1em}
 .ckSaladGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,230px),1fr));gap:10px}
-.ckSalad{display:grid;gap:6px;min-height:120px;padding:16px;border:2px solid #4a6b3f;border-radius:16px;background:#1f3324;text-align:left;align-content:center}
-.ckSalad strong{font-size:1.5em}.ckSalad small{color:var(--ck-muted);font-weight:650}.ckSalad:active{transform:scale(.98)}
+.ckSalad{display:grid;gap:4px;padding:14px;border:2px solid #4a6b3f;border-radius:16px;background:#1f3324;align-content:start}
+.ckSalad.fryer{border-color:#7c5a1e;background:#2e2615}
+.ckSalad strong{font-size:1.45em}.ckSalad small{color:var(--ck-muted);font-weight:650}
+.ckLast{color:#e6efe8;font-weight:650}.ckLast b{color:#fcd34d}
+.checklistScreen .ckSalad button{margin-top:8px;min-height:64px;padding:8px 12px;border:0;border-radius:12px;background:var(--ck-green);color:#fff;font-weight:850;font-size:1.05em}
+.checklistScreen .ckSalad.fryer button{background:#b7791f}
+.checklistScreen .ckSalad button:active{transform:scale(.98)}
 .ckSalads h2{margin-top:8px;font-size:1.1em;color:#8fd0a2;letter-spacing:.06em;text-transform:uppercase}
 .ckBatches{display:grid;gap:6px;margin:0;padding:0;list-style:none}
 .ckBatches li{display:grid;grid-template-columns:minmax(0,12em) 1fr;gap:2px 14px;padding:10px 12px;border-radius:12px;background:var(--ck-panel)}

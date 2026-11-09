@@ -4,7 +4,7 @@ import { BUSINESS_DAY_START_HOUR, STORE_TIME_ZONE } from "./business-day";
 
 /** After a PIN, the screen stays on that person this long since their last tap, so they can tick several in a row. */
 export const CHECKLIST_WORKER_IDLE_MS = 3 * 60 * 1000;
-export const CHECKLIST_LIMITS = { lists: 12, itemsPerList: 60, salads: 40, labelChars: 80, noteChars: 200, sizeChars: 40, reasonChars: 120, howToChars: 600, countFields: 3, countLabelChars: 24, countMax: 99999 };
+export const CHECKLIST_LIMITS = { lists: 12, itemsPerList: 60, salads: 40, fryers: 12, labelChars: 80, noteChars: 200, sizeChars: 40, reasonChars: 120, howToChars: 600, countFields: 3, countLabelChars: 24, countMax: 99999 };
 
 export type ChecklistWorker = { employeeId: string; name: string; role: "employee" | "manager" | "owner"; expiresAt: number };
 
@@ -188,4 +188,27 @@ export function summarizeCounts(lists: Array<{ id: string; name: string; positio
     for (const [field, value] of Object.entries(check?.counts || {})) if (/^made\b/i.test(field)) row.made += value;
   }
   return [...rows.values()];
+}
+
+/** "Tue 10:42 AM" for a store time (today and yesterday say so). */
+export function whenLabel(iso: string, now = new Date()): string {
+  const day = (at: Date) => at.toLocaleDateString("en-CA", { timeZone: STORE_TIME_ZONE });
+  const at = new Date(iso);
+  const clock = new Intl.DateTimeFormat("en-US", { timeZone: STORE_TIME_ZONE, hour: "numeric", minute: "2-digit" }).format(at);
+  const yesterday = new Date(now.getTime() - 24 * 3600e3);
+  if (day(at) === day(now)) return `Today ${clock}`;
+  if (day(at) === day(yesterday)) return `Yesterday ${clock}`;
+  const weekday = new Intl.DateTimeFormat("en-US", { timeZone: STORE_TIME_ZONE, weekday: "short", ...(now.getTime() - at.getTime() > 6 * 24 * 3600e3 ? { month: "short", day: "numeric" } : {}) }).format(at);
+  return `${weekday} ${clock}`;
+}
+
+/** "just now", "25 min ago", "3 hours ago", "2 days ago". */
+export function agoLabel(iso: string, now = new Date()): string {
+  const minutes = Math.max(0, Math.floor((now.getTime() - new Date(iso).getTime()) / 60000));
+  if (minutes < 2) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} ${hours === 1 ? "hour" : "hours"} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} ${days === 1 ? "day" : "days"} ago`;
 }

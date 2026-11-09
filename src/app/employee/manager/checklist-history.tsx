@@ -4,13 +4,16 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ManagerReportView } from "@/lib/ordering-manager-report";
 import StoreChecklistSetup from "@/components/store-checklist-setup";
+import { agoLabel, whenLabel } from "@/lib/store-checklist-rules";
 
 type Check = { employeeName: string; checkedAt: string; bulk: boolean; counts?: Record<string, number> | null; undoneAt: string | null; undoneByName: string | null; undoReason: string | null };
 type ListDay = { checklistId: string; name: string; done: number; total: number; missed: string[]; items: Array<{ itemId: string; label: string; check: Check | null; undone: Check[] }> };
 type Batch = { id: number; businessDate: string; saladName: string; employeeName: string; madeAt: string; batchSize: string; notes: string; voidedAt: string | null; voidedByName: string | null; voidReason: string | null };
 type CountRow = { key: string; label: string; cells: Array<{ list: string; onHand: number | null; by: string | null }>; made: number };
 type Day = { businessDate: string; finished: boolean; lists: ListDay[]; batches: Batch[]; counts: CountRow[] };
-type History = { today: string; days: Day[]; people: Array<{ name: string; checks: number; undone: number; batches: number }> };
+type Last = { name: string; at: string | null; by: string | null };
+type OilChange = { id: number; businessDate: string; fryerName: string; employeeName: string; changedAt: string; voidedAt: string | null; voidedByName: string | null; voidReason: string | null };
+type History = { today: string; days: Day[]; oilChanges: OilChange[]; lastDone: { salads: Last[]; fryers: Last[] }; people: Array<{ name: string; checks: number; undone: number; batches: number }> };
 
 const time = (iso: string) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" }).format(new Date(iso));
 const countText = (counts?: Record<string, number> | null) => (counts ? Object.entries(counts).map(([field, value]) => `${field} ${value}`).join(" · ") : "");
@@ -61,6 +64,17 @@ export default function ChecklistHistory({ view, date, onOpenDay }: { view: Mana
       {view !== "day" && <article><span>Jobs checked</span><strong>{history.people.reduce((sum, row) => sum + row.checks, 0)}</strong><small>{history.people.filter((row) => row.checks).length} people</small></article>}
       <article className={undone ? "warn" : ""}><span>Un-checked</span><strong>{undone}</strong><small>With a reason</small></article>
     </section>
+
+    <Section title="Last made / last changed">
+      <div className="ckLastGrid">
+        {[...history.lastDone.salads.map((row) => ({ ...row, kind: "salad" })), ...history.lastDone.fryers.map((row) => ({ ...row, kind: "fryer" }))].map((row) => (
+          <article key={`${row.kind}-${row.name}`} className={row.kind === "fryer" ? "fryer" : ""}>
+            <strong>{row.kind === "fryer" ? `${row.name} oil` : row.name}</strong>
+            {row.at ? <><span>{whenLabel(row.at)} · <b>{agoLabel(row.at)}</b></span><small>by {row.by}</small></> : <span>Never logged</span>}
+          </article>
+        ))}
+      </div>
+    </Section>
 
     {!history.days.length && <p className="mgrEmpty">Nothing for this period yet.</p>}
 
@@ -121,6 +135,17 @@ export default function ChecklistHistory({ view, date, onOpenDay }: { view: Mana
           <strong>{batch.voidedAt ? <s>{batch.saladName}</s> : batch.saladName}</strong>
           <small>{batch.employeeName} · {view === "day" ? "" : `${dayLabel(batch.businessDate)} `}{time(batch.madeAt)}{batch.batchSize ? ` · ${batch.batchSize}` : ""}{batch.notes ? ` · ${batch.notes}` : ""}</small>
           {batch.voidedAt && <small>Removed by {batch.voidedByName}: {batch.voidReason}</small>}
+        </div>
+      </div>)}
+    </Section>
+
+    <Section title="Fryer oil" count={history.oilChanges.filter((row) => !row.voidedAt).length}>
+      {history.oilChanges.length === 0 && <p className="mgrEmpty">No oil changes logged.</p>}
+      {history.oilChanges.map((row) => <div key={row.id} className="mgrRow">
+        <div>
+          <strong>{row.voidedAt ? <s>{row.fryerName}</s> : row.fryerName}</strong>
+          <small>{row.employeeName} · {view === "day" ? "" : `${dayLabel(row.businessDate)} `}{time(row.changedAt)}</small>
+          {row.voidedAt && <small>Removed by {row.voidedByName}: {row.voidReason}</small>}
         </div>
       </div>)}
     </Section>

@@ -4,7 +4,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
   businessHour, cleanVideoUrl, decodeWorker, defaultChecklistId, encodeWorker, hourLabel, parseCountFields, parseCounts, parseOpensAtHour,
-  summarizeChecklistDay, summarizeCounts, tallyByEmployee, youtubeEmbedUrl,
+  summarizeChecklistDay, summarizeCounts, tallyByEmployee, youtubeEmbedUrl, agoLabel, whenLabel,
   type HistoryCheck,
 } from "../src/lib/store-checklist-rules";
 import { businessDayBoundary } from "../src/lib/business-day";
@@ -185,4 +185,27 @@ test("checklists: 0051 replaces the placeholders with the store's jobs and keeps
   assert.match(migration, /'Stock containers up front and by fryer', '', true/);
   assert.doesNotMatch(migration, /10 pizzas/);
   assert.match(migration, /AND item\.placeholder AND EXISTS \(SELECT 1 FROM store_checklist_checks/);
+});
+
+test("checklists: last-made cards say when and how long ago", () => {
+  // Mon 2026-11-09 3:00 PM Eastern.
+  const now = new Date("2026-11-09T20:00:00Z");
+  assert.equal(whenLabel("2026-11-09T15:42:00Z", now), "Today 10:42 AM");
+  assert.equal(whenLabel("2026-11-08T23:05:00Z", now), "Yesterday 6:05 PM");
+  assert.equal(whenLabel("2026-11-07T15:42:00Z", now), "Sat 10:42 AM");
+  assert.equal(whenLabel("2026-10-20T15:42:00Z", now), "Tue, Oct 20 11:42 AM");
+  assert.equal(agoLabel("2026-11-09T19:59:30Z", now), "just now");
+  assert.equal(agoLabel("2026-11-09T19:35:00Z", now), "25 min ago");
+  assert.equal(agoLabel("2026-11-09T18:59:00Z", now), "1 hour ago");
+  assert.equal(agoLabel("2026-11-09T15:00:00Z", now), "5 hours ago");
+  assert.equal(agoLabel("2026-11-08T19:00:00Z", now), "1 day ago");
+  assert.equal(agoLabel("2026-11-07T15:42:00Z", now), "2 days ago");
+});
+
+test("checklists: 0052 seeds two fryers once and finalizes the last two placeholder jobs", () => {
+  const migration = readFileSync("db/migrations/0052_fryer_oil_log.sql", "utf8");
+  assert.match(migration, /\('Fryer 1', 10\), \('Fryer 2', 20\)/);
+  assert.match(migration, /WHERE NOT EXISTS \(SELECT 1 FROM store_fryers WHERE business = 'Corner Deli'\)/);
+  assert.match(migration, /label = 'Stock containers and lids'/);
+  assert.match(migration, /directions on the back of the bag/);
 });

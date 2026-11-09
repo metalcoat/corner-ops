@@ -2,21 +2,26 @@
 // The deli's checklist screen: tap an item (or a salad), type a PIN once, and keep tapping for a few minutes as
 // that person. Built to stay out of the way: one tap per job, and "Mark the rest done" for the end of the night.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { defaultChecklistId } from "@/lib/store-checklist-rules";
+import { agoLabel, defaultChecklistId, whenLabel } from "@/lib/store-checklist-rules";
 
 type Check = { id: number; employeeName: string; checkedAt: string; counts: Record<string, number> | null };
 type Item = { id: string; label: string; howTo: string; video: string | null; countFields: string[]; check: Check | null };
 type List = { id: string; name: string; opensAtHour: number; items: Item[] };
-type Salad = { id: string; name: string };
+type Last = { at: string; by: string } | null;
+type Salad = { id: string; name: string; last: Last };
+type Fryer = { id: string; name: string; last: (Last & { id: number }) | null };
+type OilChange = { id: number; fryerName: string; employeeName: string; changedAt: string };
 type Batch = { id: number; businessDate: string; saladId: string; saladName: string; employeeName: string; madeAt: string; batchSize: string; notes: string };
-type Screen = { businessDate: string; lists: List[]; salads: Salad[]; batches: Batch[] };
+type Screen = { businessDate: string; lists: List[]; salads: Salad[]; batches: Batch[]; fryers: Fryer[] };
 type Worker = { employeeId: string; name: string; expiresAt: number };
 type Action =
   | { action: "check"; itemIds: string[]; bulk?: boolean; counts?: Record<string, string> }
   | { action: "uncheck"; itemId: string; reason: string }
   | { action: "salad"; saladId: string }
   | { action: "batch"; id: number; batchSize: string; notes: string }
-  | { action: "void-batch"; id: number; reason: string };
+  | { action: "void-batch"; id: number; reason: string }
+  | { action: "oil"; fryerId: string }
+  | { action: "void-oil"; id: number; reason: string };
 
 const SALADS = "salads";
 const UNDO_REASONS = ["Tapped by mistake", "Not done right", "Needs doing again"];
@@ -36,6 +41,7 @@ export default function ChecklistsScreen() {
   const [undo, setUndo] = useState<{ item: Item } | null>(null);
   const [confirmAll, setConfirmAll] = useState<List | null>(null);
   const [logged, setLogged] = useState<Batch | null>(null);
+  const [oiled, setOiled] = useState<OilChange | null>(null);
   const [counting, setCounting] = useState<Item | null>(null);
   const [openHow, setOpenHow] = useState<string>("");
   const [video, setVideo] = useState<{ title: string; src: string } | null>(null);
@@ -106,6 +112,8 @@ export default function ChecklistsScreen() {
       setScreen(body.screen);
       if (action.action === "salad" && body.batch) setLogged(body.batch);
       if (action.action === "batch" || action.action === "void-batch") setLogged(null);
+      if (action.action === "oil" && body.oil) setOiled(body.oil);
+      if (action.action === "void-oil") setOiled(null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "That didn't save. Try again.");
     } finally {
@@ -160,8 +168,8 @@ export default function ChecklistsScreen() {
           );
         })}
         <button type="button" className={tab === SALADS ? "active" : ""} aria-pressed={tab === SALADS} onClick={() => setTab(SALADS)}>
-          <strong>Deli salads</strong>
-          <small>{todayBatches.length ? `${todayBatches.length} made today` : "None made today"}</small>
+          <strong>Salads &amp; fryers</strong>
+          <small>{todayBatches.length ? `${todayBatches.length} salad ${todayBatches.length === 1 ? "batch" : "batches"} today` : "No salads made today"}</small>
         </button>
       </nav>
 
@@ -210,20 +218,21 @@ export default function ChecklistsScreen() {
       })()}
 
       {tab === SALADS && (
-        <section className="ckSalads" aria-label="Deli salads">
-          <p className="ckHint">Made a fresh batch? Tap the salad.</p>
+        <section className="ckSalads" aria-label="Deli salads and fryers">
+          <h2>Deli salads</h2>
           <div className="ckSaladGrid">
-            {screen.salads.map((salad) => {
-              const last = screen.batches.find((batch) => batch.saladId === salad.id);
-              return (
-                <button type="button" key={salad.id} disabled={busy} className="ckSalad" onClick={() => void run({ action: "salad", saladId: salad.id })}>
-                  <strong>{salad.name}</strong>
-                  <small>{last ? `Last: ${dayTime(last.madeAt, screen.businessDate, last.businessDate)} · ${first(last.employeeName)}` : "No batch in the last 3 days"}</small>
-                </button>
-              );
-            })}
+            {screen.salads.map((salad) => (
+              <LastCard key={salad.id} name={salad.name} last={salad.last} now={now} never="No batch logged yet" action="Made a batch" busy={busy} onTap={() => void run({ action: "salad", saladId: salad.id })} />
+            ))}
           </div>
           {screen.salads.length === 0 && <p className="ckEmpty">No salads set up. A manager can add them in Settings.</p>}
+          <h2>Fryer oil</h2>
+          <div className="ckSaladGrid">
+            {screen.fryers.map((fryer) => (
+              <LastCard key={fryer.id} name={fryer.name} last={fryer.last} now={now} never="Not logged yet" action="Oil changed / filled" fryer busy={busy} onTap={() => void run({ action: "oil", fryerId: fryer.id })} />
+            ))}
+          </div>
+          {screen.fryers.length === 0 && <p className="ckEmpty">No fryers set up. A manager can add them in Settings.</p>}
           <h2>Recent batches</h2>
           {screen.batches.length === 0 && <p className="ckEmpty">None in the last 3 days.</p>}
           <ul className="ckBatches">
@@ -252,7 +261,7 @@ export default function ChecklistsScreen() {
         </div>
       )}
 
-      {pinFor && <PinPad onCancel={() => setPinFor(null)} onPin={signIn} title={pinFor.action === "salad" ? "Who made it?" : pinFor.action === "uncheck" ? "Who is un-checking?" : pinFor.action === "check" && pinFor.counts ? "Who counted?" : "Who did it?"} />}
+      {pinFor && <PinPad onCancel={() => setPinFor(null)} onPin={signIn} title={pinFor.action === "salad" ? "Who made it?" : pinFor.action === "oil" ? "Who changed the oil?" : pinFor.action === "uncheck" ? "Who is un-checking?" : pinFor.action === "check" && pinFor.counts ? "Who counted?" : "Who did it?"} />}
 
       {undo && (
         <div className="ckModal" role="dialog" aria-modal="true" aria-label="Un-check">
@@ -285,12 +294,49 @@ export default function ChecklistsScreen() {
         </div>
       )}
 
+      {oiled && <OilSheet change={oiled} busy={busy} onClose={() => setOiled(null)} onUndo={() => void run({ action: "void-oil", id: oiled.id, reason: "Tapped by mistake" })} />}
       {logged && <BatchSheet batch={logged} busy={busy} onClose={() => setLogged(null)} onSave={(batchSize, notes) => void run({ action: "batch", id: logged.id, batchSize, notes })} onUndo={() => void run({ action: "void-batch", id: logged.id, reason: "Tapped by mistake" })} />}
     </main>
   );
 }
 
 /** Shown after a salad is logged: optional size and note, or undo a mis-tap. Closes itself after a while. */
+/** A salad or fryer: when it was last done, by whom, and one big button to log it again. */
+function LastCard({ name, last, now, never, action, fryer, busy, onTap }: { name: string; last: Last; now: number; never: string; action: string; fryer?: boolean; busy: boolean; onTap: () => void }) {
+  const at = new Date(now);
+  return (
+    <article className={fryer ? "ckSalad fryer" : "ckSalad"}>
+      <strong>{name}</strong>
+      {last ? <>
+        <span className="ckLast">{whenLabel(last.at, at)} · <b>{agoLabel(last.at, at)}</b></span>
+        <small>by {last.by}</small>
+      </> : <span className="ckLast">{never}</span>}
+      <button type="button" disabled={busy} onClick={onTap}>{action}</button>
+    </article>
+  );
+}
+
+function OilSheet({ change, busy, onClose, onUndo }: { change: OilChange; busy: boolean; onClose: () => void; onUndo: () => void }) {
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    const timer = window.setTimeout(() => close.current(), 10_000);
+    return () => window.clearTimeout(timer);
+  }, [change.id]);
+  return (
+    <div className="ckSheet" role="status">
+      <section>
+        <strong>✓ {change.fryerName}: oil logged</strong>
+        <span>{change.employeeName} · {time(change.changedAt)}</span>
+        <div className="ckChoices">
+          <button type="button" disabled={busy} onClick={onUndo}>Undo</button>
+          <button type="button" className="ckCancel" onClick={onClose}>OK</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function BatchSheet({ batch, busy, onClose, onSave, onUndo }: { batch: Batch; busy: boolean; onClose: () => void; onSave: (size: string, notes: string) => void; onUndo: () => void }) {
   const [size, setSize] = useState(batch.batchSize);
   const [notes, setNotes] = useState(batch.notes);

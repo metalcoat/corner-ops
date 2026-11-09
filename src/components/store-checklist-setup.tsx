@@ -9,8 +9,9 @@ type Entry = { id: string; placeholder?: boolean; active: boolean };
 type Item = Entry & { label: string; howTo: string; videoUrl: string; countFields: string[] };
 type List = Entry & { name: string; opensAtHour: number; items: Item[] };
 type Salad = Entry & { name: string };
-type Setup = { lists: List[]; salads: Salad[] };
-type Kind = "list" | "item" | "salad";
+type Fryer = Entry & { name: string };
+type Setup = { lists: List[]; salads: Salad[]; fryers: Fryer[] };
+type Kind = "list" | "item" | "salad" | "fryer";
 
 const HOURS = Array.from({ length: 24 }, (_, index) => index + 4);
 const URL_SETUP = "/api/employee/manager-report/checklists/setup";
@@ -48,7 +49,7 @@ export default function StoreChecklistSetup() {
   if (!setup) return <section className="posSettingsCard ckSetup"><h2>Checklists &amp; deli salads</h2><p role={message ? "alert" : undefined}>{message || "Loading…"}</p></section>;
   return (
     <section className="posSettingsCard ckSetup">
-      <h2>Checklists &amp; deli salads</h2>
+      <h2>Checklists, deli salads &amp; fryers</h2>
       <p className="ckSetupHint">
         What shows on the deli&apos;s checklist screen (<a href="/pos/checklists">/pos/checklists</a>). Lists start over at 4 AM each day.
         Items marked <em>placeholder</em> are examples to replace with your own wording. Switching one off hides it and keeps its history.
@@ -88,6 +89,17 @@ export default function StoreChecklistSetup() {
           ))}
         </ol>
         <Adder placeholder="Add a salad, e.g. Egg salad" onAdd={(name) => send("PUT", { kind: "salad", name }, "Added.")} />
+
+        <h3>Fryers</h3>
+        <p className="ckSetupHint">One card each on the screen. Staff tap “Oil changed / filled” when they change or top up the oil.</p>
+        <ol>
+          {setup.fryers.map((fryer, index) => (
+            <Row key={fryer.id} text={fryer.name} entry={fryer} first={index === 0} last={index === setup.fryers.length - 1}
+              onMove={(direction) => move("fryer", fryer.id, direction)}
+              onSave={(change) => void send("PUT", { kind: "fryer", id: fryer.id, name: fryer.name, active: fryer.active, ...change }, "Saved.")} />
+          ))}
+        </ol>
+        <Adder placeholder="Add a fryer, e.g. Fryer 3" onAdd={(name) => send("PUT", { kind: "fryer", name }, "Added.")} />
       </fieldset>
     </section>
   );

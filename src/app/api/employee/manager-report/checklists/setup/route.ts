@@ -4,7 +4,7 @@ import { checklistSetup, moveSetupEntry, saveSetupEntry, type SetupKind } from "
 
 export const runtime = "nodejs";
 
-// Managers add, rename, reorder and switch off checklists, their items and the deli salads.
+// Managers add, rename, reorder and switch off checklists, their items, the deli salads and the fryers.
 // Switching something off keeps its history; nothing is deleted from here.
 const denied = () => isoJson({ error: "Manager access required." }, { status: 403 });
 const fail = (error: unknown) => isoJson({ error: error instanceof Error ? error.message : "Could not save." }, { status: 400 });
@@ -33,7 +33,7 @@ export async function PATCH(request: Request) {
   try {
     const body = (await request.json()) as Record<string, unknown>;
     const kind = body.kind as SetupKind;
-    if (!["list", "item", "salad"].includes(kind) || (body.direction !== "up" && body.direction !== "down")) throw new Error("Bad move.");
+    if (!["list", "item", "salad", "fryer"].includes(kind) || (body.direction !== "up" && body.direction !== "down")) throw new Error("Bad move.");
     await moveSetupEntry(kind, String(body.id || ""), body.direction, actor.name);
     return isoJson(await checklistSetup());
   } catch (error) {

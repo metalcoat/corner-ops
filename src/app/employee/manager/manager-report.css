@@ -30,3 +30,6 @@
 .ckEdit{margin-top:22px}.ckEdit summary{min-height:42px;padding:10px 2px;color:#93c5fd;cursor:pointer;font-weight:700}
 .ckCountTable{margin:8px 0 14px;overflow-x:auto}.ckCountTable h3{margin:0 0 4px;font-size:1rem}
 .ckCountTable table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}.ckCountTable th,.ckCountTable td{padding:6px 8px;border-bottom:1px solid #1e293b;text-align:right;white-space:nowrap}.ckCountTable th:first-child,.ckCountTable td:first-child{text-align:left}.ckCountTable th{color:var(--mgr-muted);font-weight:600;font-size:.8rem}
+.ckLastGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.ckLastGrid article{display:grid;gap:2px;padding:10px 12px;border:1px solid var(--mgr-line);border-radius:10px;background:var(--mgr-panel)}
+.ckLastGrid article.fryer{border-color:#7c5a1e}.ckLastGrid span{font-size:.85rem}.ckLastGrid b{color:#fcd34d;font-weight:700}.ckLastGrid small{color:var(--mgr-muted)}
