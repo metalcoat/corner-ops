@@ -4335,27 +4335,23 @@ export default function PosClient({
             );
           })()}
           {customer && customer.phones?.length > 1 && (
-            <div
-              className="posCustomerChoices"
+            <select
+              className="posContactSelect"
               aria-label="Contact number for this order"
+              value={selectedCustomerPhoneId}
+              onChange={(event) => {
+                setSelectedCustomerPhoneId(event.target.value);
+                setSavedDraft(null);
+              }}
             >
-              <strong>CONTACT NUMBER</strong>
+              {!selectedCustomerPhoneId && <option value="">Choose phone</option>}
               {customer.phones.map((phone) => (
-                <button
-                  type="button"
-                  key={phone.id}
-                  className={
-                    selectedCustomerPhoneId === phone.id ? "selected" : ""
-                  }
-                  onClick={() => {
-                    setSelectedCustomerPhoneId(phone.id);
-                    setSavedDraft(null);
-                  }}
-                >
-                  {phone.label || "Phone"} · {phone.display_phone}
-                </button>
+                <option key={phone.id} value={phone.id}>
+                  {phone.display_phone}
+                  {phone.label && phone.label !== "Imported" ? ` · ${phone.label}` : ""}
+                </option>
               ))}
-            </div>
+            </select>
           )}
 
           {serviceType === "delivery" && (
@@ -4380,7 +4376,7 @@ export default function PosClient({
                       <option value="">Choose delivery address</option>
                       {customer.addresses.map((address) => (
                         <option key={address.id} value={address.id}>
-                          {address.label || "Address"} · {address.line1}
+                          {address.label && address.label !== "Imported" ? `${address.label} · ${address.line1}` : address.line1}
                         </option>
                       ))}
                     </select>
@@ -4403,7 +4399,8 @@ export default function PosClient({
                       setDeliveryEditorOpen(true);
                     }}
                   >
-                    + ADD NEW ADDRESS
+                    <span aria-hidden="true">+ NEW</span>
+                    <span className="posSrOnly">+ ADD NEW ADDRESS</span>
                   </button>
                   {selectedCustomerAddressId&&<><button type="button" className="posAddAddressButton" onClick={editSelectedCustomerAddress}>EDIT</button><button type="button" className="posAddAddressButton danger" disabled={savingCustomerAddress} onClick={()=>void deleteSelectedCustomerAddress()}>DELETE</button></>}
                 </div>

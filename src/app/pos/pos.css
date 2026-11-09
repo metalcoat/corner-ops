@@ -2903,3 +2903,13 @@
 /* Employee meal and drinks share one section; the MEAL / DRINKS tabs sit under the header. */
 .posEmployeeMealDialog{grid-template-rows:auto auto auto auto minmax(0,1fr) auto auto}.posEmployeeDrinkDialog{grid-template-rows:auto auto auto minmax(0,1fr) auto auto auto}
 .posEmployeeMenuTabs{display:flex;gap:8px}.posEmployeeMenuTabs button{flex:1;min-height:48px;font-weight:900}.posEmployeeMenuTabs button.active{background:#7c3aed;border-color:#c4b5fd}
+/* Customer, contact number and delivery address share one row so the menu keeps its height. */
+.posCustomerDeliveryArea,.posCustomerDeliveryArea.hasDelivery{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.posCustomerDeliveryArea .posCustomerCompact{flex:0 1 210px;width:auto}
+.posCustomerDeliveryArea .posCustomerChoices{flex:1 1 100%}
+.posCustomerDeliveryArea .posDelivery{flex:1 1 300px;min-width:0}
+.posContactSelect{flex:0 0 auto;max-width:200px;height:42px;border:1px solid #60a5fa;border-radius:8px;background:#0f172a;color:#fff;padding:5px 8px;font:inherit;font-weight:800}
+.posCustomerDeliveryArea .posAddressEntry{align-items:center;gap:6px;flex-direction:row}
+.posCustomerDeliveryArea .posSavedAddressSelect{flex:1 1 150px;min-width:120px;max-width:300px}
+.posCustomerDeliveryArea .posAddAddressButton{min-width:0;padding-inline:12px}
+.posSrOnly{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
