@@ -691,9 +691,9 @@ flowchart LR
   Upfront) = front, and `back-register` (Back pos 1) = back (confirmed by Chris 2026-10-30). A till no station uses can be
   retired in Settings → Tills (inactive, history kept; an empty open session is closed). Only a manager can open, count or close out a till; cash sales, refunds, paid in/out and drops move the
   session's expected cash.
-- Driver cash-out (`/pos/deli/drivers`, `src/lib/ordering-driver-cash.ts`, since 2026-11-09): lists unpaid delivery
-  orders a driver has taken (picked up / en route / arrived / delivered) or that are marked complete, never one still
-  in the store, with who took it and when. Select all takes every listed order (any driver); each settled order keeps
+- Driver cash-out (`/pos/deli/drivers`, `src/lib/ordering-driver-cash.ts`, since 2026-11-09): lists every unpaid
+  delivery order sent to the kitchen, whether or not delivery tracking was used (Chris: tracking can fail), with who
+  took it and when where recorded. A customer can still pay by card at any time; a paid order drops off. Select all takes every listed order (any driver); each settled order keeps
   its driver (`ordering_driver_cash_settlement_orders.driver_employee_id`, migration 0059). A short cash-out needs a
   manager and a reason (settlement `notes`). Driver cash goes in the back drawer: the `back-register` till must be
   open, and its expected cash rises by the cash kept (`driver_turn_in` movement; anything over is handed back).

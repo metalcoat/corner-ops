@@ -38,14 +38,13 @@ async function main(){
     assert.equal(order.payment_status,"paid");assert.equal(Number(order.amount_due_cents),0);assert.deepEqual([settlement.status,Number(settlement.order_count),Number(settlement.expected_cash_cents),Number(settlement.turned_in_cash_cents),Number(settlement.over_short_cents)],["posted",1,2500,2600,100]);
     assert.equal(settlement.created_by,driver.employeeId);assert.equal(settlement.approved_by,driver.employeeId);
     result.assignedDriverCanSettle=true;result.loggedInEmployeeAudited=true;result.bulkSettlementPostsPayments=true;result.overShortAudited=true;
-    // An order still in the store can't be cashed out; once the driver picks it up, the row shows who took it and when.
+    // Every unpaid delivery is listed even when tracking wasn't used; once the driver picks it up, the row shows who took it and when.
     const otherDriverId=randomUUID(),kitchenId=randomUUID(),otherId=randomUUID(),addOrder=async(id:string,status:string,number:string)=>{await sql`INSERT INTO ordering_orders(id,business,source,status,payment_status,service_type,display_number,created_by,first_name_snapshot,last_name_snapshot,phone_snapshot,total_cents,amount_due_cents,submitted_at)VALUES(${id},'Corner Deli','pos',${status},'unpaid','delivery',${number},'driver-cash-test','Cash','Customer','3155550199',1000,1000,NOW())`};
     await sql`INSERT INTO employees(id,business,name,pin_hash,position,role_group,active)VALUES(${otherDriverId},'Corner Deli',${`Other Driver ${suffix}`},${`other-${suffix}`},'Driver','Driver',TRUE)`;
     await addOrder(kitchenId,'sent_to_kitchen',`KIT-${suffix}`);await addOrder(otherId,'ready',`OTH-${suffix}`);
     await sql`INSERT INTO ordering_delivery_assignments(id,order_id,business,driver_employee_id,status,assigned_by)VALUES(${randomUUID()},${kitchenId},'Corner Deli',${driverId},'READY_FOR_DRIVER','validation'),(${randomUUID()},${otherId},'Corner Deli',${otherDriverId},'EN_ROUTE','validation')`;
     await sql`UPDATE ordering_delivery_assignments SET picked_up_at=NOW() WHERE order_id=${otherId}`;
-    assert.equal((await driverCashDashboard(manager)).orders.some(row=>row.order_id===kitchenId),false);
-    await assert.rejects(()=>postDriverCashSettlement(manager,{orderIds:[kitchenId],turnedInCashCents:1000,businessDate:"2026-08-25"}),/no longer eligible/);result.ordersInStoreNotCashedOut=true;
+    const notTaken=(await driverCashDashboard(manager)).orders.find(row=>row.order_id===kitchenId);assert.ok(notTaken);assert.equal(notTaken.taken_at,null);result.untrackedOrdersStillListed=true;
     await sql`UPDATE ordering_delivery_assignments SET status='PICKED_UP',picked_up_at=NOW() WHERE order_id=${kitchenId}`;
     const taken=(await driverCashDashboard(manager)).orders.find(row=>row.order_id===kitchenId);assert.ok(taken);assert.equal(taken.driver_name,driver.name);assert.ok(taken.taken_at);result.takenByAndWhenShown=true;
     // Driver cash goes in the back drawer; the back till has to be open.

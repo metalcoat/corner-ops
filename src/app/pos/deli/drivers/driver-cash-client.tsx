@@ -139,7 +139,7 @@ export default function DriverCashClient() {
           <small>DELIVERY CASH</small>
           <h1>Driver bulk cash-out</h1>
           <p>
-            Orders show here once a driver has taken them (or the order is marked complete). Each row shows who took it and when.
+            Every unpaid delivery order shows here, even when delivery tracking wasn't used. Each row shows who took it and when, if that was recorded.
             The system totals the orders and posts one audited settlement under the employee signed into this POS; the cash goes in the back drawer.
           </p>
         </div>
@@ -193,8 +193,8 @@ export default function DriverCashClient() {
                 <span><b>{order.customer_name}</b><small>{order.delivery_address}{order.delivery_unit ? ` · ${order.delivery_unit}` : ""}</small></span>
                 <span className="driverCashTaken">
                   <b>{order.driver_name || "No driver recorded"}</b>
-                  <small>{order.taken_at ? `Taken ${clock(order.taken_at)}` : "App not used"}{order.delivered_at ? ` · Delivered ${clock(order.delivered_at)}` : !order.taken_at && order.completed_at ? ` · Completed ${clock(order.completed_at)}` : ""}</small>
-                  <em className={`driverCashStatus ${order.delivery_status ? order.delivery_status.toLowerCase() : "none"}`}>{order.delivery_status?.replaceAll("_", " ").toLowerCase() || "completed"}</em>
+                  <small>{order.taken_at ? `Taken ${clock(order.taken_at)}` : "Not marked taken"}{order.delivered_at ? ` · Delivered ${clock(order.delivered_at)}` : !order.taken_at && order.completed_at ? ` · Completed ${clock(order.completed_at)}` : ""}</small>
+                  <em className={`driverCashStatus ${order.delivery_status ? order.delivery_status.toLowerCase() : "none"}`}>{order.delivery_status?.replaceAll("_", " ").toLowerCase() || "app not used"}</em>
                 </span>
                 <b>{money(Number(order.amount_due_cents))}</b>
               </label>
@@ -203,7 +203,7 @@ export default function DriverCashClient() {
           {!orders.length && (
             <div className="driverCashEmpty">
               <strong>No delivery cash to settle</strong>
-              <span>Unpaid delivery orders appear here once a driver takes them out (or the order is marked complete).</span>
+              <span>Unpaid delivery orders appear here once they are sent to the kitchen.</span>
             </div>
           )}
         </section>
