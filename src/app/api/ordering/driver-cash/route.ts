@@ -59,6 +59,7 @@ export async function POST(request: Request) {
         orderIds: Array.isArray(body.orderIds) ? body.orderIds.map(String) : [],
         turnedInCashCents: Number(body.turnedInCashCents),
         businessDate: String(body.businessDate || ""),
+        shortReason: String(body.shortReason || ""),
       }),
       { status: 201 },
     );
