@@ -16,11 +16,12 @@ async function main(): Promise<void> {
   assert.ok(employee, "an employee to record the receiving");
   const manager = { id: String(employee.id), name: "Rollback Check", type: "employee" as const, role: "manager" as const };
   const created: { supplier?: string; items: string[]; po?: string } = { items: [] };
+  const savedId = async (body: Record<string, unknown>) => String(((await inventoryAction(body, manager)) as { id?: unknown }).id);
   try {
-    created.supplier = String((await inventoryAction({ action: "save_supplier", name: `${TAG} supplier` }, manager)).id);
-    for (const name of ["first", "second"]) created.items.push(String((await inventoryAction({ action: "save_item", name: `${TAG} ${name}`, baseUnit: "each" }, manager)).id));
+    created.supplier = await savedId({ action: "save_supplier", name: `${TAG} supplier` });
+    for (const name of ["first", "second"]) created.items.push(await savedId({ action: "save_item", name: `${TAG} ${name}`, baseUnit: "each" }));
     const lines = created.items.map((itemId) => ({ itemId, quantityCases: 1, caseQuantity: 12, caseUnit: "case", casePriceCents: 1200 }));
-    created.po = String((await inventoryAction({ action: "create_po", supplierId: created.supplier, lines }, manager)).id);
+    created.po = await savedId({ action: "create_po", supplierId: created.supplier, lines });
     // The second line's remaining stock rounds to zero, which the movements table refuses.
     await sql`UPDATE ordering_inventory_purchase_order_lines SET received_cases=0.999,case_quantity=0.001 WHERE purchase_order_id=${created.po} AND inventory_item_id=${created.items[1]}`;
 
