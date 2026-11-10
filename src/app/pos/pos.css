@@ -1013,6 +1013,23 @@
   color: #fecaca;
   font-weight: 900;
 }
+.posReopenedLineFooter button.posLineEdit {
+  margin-left: auto;
+  border-color: #3b82f6;
+  background: #1e3a5f;
+  color: #bfdbfe;
+}
+.posLineEditSave p {
+  margin: 0;
+}
+.posLineEditSave p b {
+  display: inline-block;
+  min-width: 44px;
+  color: #93c5fd;
+}
+.posLineEditSave .posQtyControls {
+  justify-content: flex-start;
+}
 .posReopenedVoidDialog {
   width: min(520px, 96vw);
 }
@@ -2715,6 +2732,84 @@
   color: #cbd5e1;
   font-size: 0.92rem;
   font-weight: 700;
+}
+/* VOID inside the payment window: the order's lines, each with its own VOID. */
+.posCheckoutItems {
+  display: grid;
+  gap: 4px;
+  max-height: 34dvh;
+  overflow-y: auto;
+  padding: 6px 10px;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  background: #0b1220;
+}
+.posCheckoutItemRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+}
+.posCheckoutItemRow span {
+  min-width: 0;
+  color: #e2e8f0;
+  font-weight: 800;
+}
+.posCheckoutItemRow small {
+  margin-left: 8px;
+  color: #64748b;
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+}
+.posCheckoutItemRow b {
+  font-variant-numeric: tabular-nums;
+}
+.posCheckoutItems button.posCheckoutItemVoid {
+  min-height: 38px;
+  padding: 4px 14px;
+  border: 1px solid #ef4444;
+  background: #3f161d;
+  color: #fecaca;
+  font-weight: 900;
+}
+.posCheckoutItems:has(.isVoiding) {
+  max-height: none;
+}
+.posCheckoutItems .isVoiding {
+  padding: 4px 8px 10px;
+  border-radius: 10px;
+  background: #2a1414;
+}
+.posCheckoutItemVoidForm {
+  display: grid;
+  gap: 8px;
+}
+.posCheckoutItemVoidForm p {
+  margin: 0;
+  color: #fecaca;
+  font-weight: 800;
+}
+.posCheckoutItemVoidForm input {
+  min-height: 44px;
+}
+.posCheckoutVoidReasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.posCheckoutVoidReasons button {
+  min-height: 38px;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+}
+.posCheckoutVoidReasons button.selected {
+  border-color: #fca5a5;
+  background: #7f1d1d;
+}
+.posCheckoutItemVoidForm button.danger {
+  min-height: 48px;
 }
 .posCheckoutSidePanel .posSplitOrderButton {
   min-height: 46px;

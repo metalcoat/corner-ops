@@ -71,3 +71,17 @@ test("refunds and voids done from the manager portal say so", () => {
     ["Refunded $12.50", "Pat", "Visa ····1111 · Customer cancelled · from manager portal"],
   ]);
 });
+
+test("an edited item is one history line with before, after, price, reason and approver", () => {
+  const trail = orderTrail({
+    createdAt: at(5), takenBy: "Sam",
+    events: [
+      { event_type: "order_item_cancelled", created_at: at(7), actor_name: "Sam", details: { quantity: 1, itemName: "Pizza", reason: "Edited: wrong topping", via: "line_edit" } },
+      { event_type: "order_item_edited", created_at: at(7), actor_name: "Sam", details: { rootSent: true, beforeText: "1x PIZZA: PEPPERONI", afterText: "1x PIZZA: SAUSAGE", priceBeforeCents: 1775, priceAfterCents: 1825, reason: "wrong topping", approvedByName: "Mandy" } },
+    ],
+    payments: [],
+  });
+  assert.deepEqual(trail.slice(1).map((row) => [row.label, row.who, row.detail]), [
+    ["Item changed after it was sent", "Sam", "1x PIZZA: PEPPERONI → 1x PIZZA: SAUSAGE · $17.75 → $18.25 · wrong topping · approved by Mandy"],
+  ]);
+});

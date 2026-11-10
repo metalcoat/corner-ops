@@ -645,6 +645,20 @@ flowchart LR
   sign-in); the reason and `approvedByName` are on the order event. Voiding a whole order the kitchen already has prints
   a VOID WHOLE ORDER notice (`event_subtype='order_void'`, the one kitchen job a cancelled order still prints). CLEAR ACTIVE TEST
   ORDERS (dev only) voids silently, with no notice, because dev is wired to the real store printers.
+  The payment window of a loaded order lists its lines with a VOID on each (same rules, PIN typed inline); the amount
+  due updates in place, and voiding the last line closes checkout and opens VOID WHOLE ORDER. An item already paid for
+  is refunded from the order screen's VOID instead. A line voided before the kitchen ever saw it prints nothing.
+- EDIT on a saved line (`src/lib/ordering-line-edits.ts`, `POST /api/ordering/order-center/[id]/items/edit`): opens the
+  item screen pre-filled (`savedLineConfiguration`); saving voids the old line (`via: line_edit`) and adds the new one in
+  its place, priced from the menu now. Unsent lines: anyone, nothing extra prints. Sent lines: manager PIN and reason; on
+  the next SEND or payment the kitchen gets an ORDER CHANGE ticket, "** CHANGED ** 1x PIZZA / - PEPPERONI / + SAUSAGE"
+  (size, quantity, note too), instead of a void plus a new item (`pendingLineEdits` in `ordering-sent-lines.ts`). Event
+  `order_item_edited` holds before/after, price, reason, who and approver; order history shows "Item changed". An edit
+  that would leave the order costing less than was already paid is refused (use VOID to refund).
+- Checks hold live quantities only: voided quantities never go on a check (`ensureInitialCheck`, splits), and voiding all
+  of a line takes it off its check.
+- Kitchen tickets print a default the customer took off as NO CLASSIC SAUCE (it printed as plain CLASSIC SAUCE before
+  2026-11-10), and voided quantities never print.
 - Refunds and voids away from the POS (manager portal, `/employee/manager/orders` → an order → Refund or void;
   `src/lib/manager-portal-refunds.ts`, `POST /api/employee/order-search/[id]/refund` and `/void`): managers and owners
   signed in to the employee app, each action confirmed with their own PIN (same attempt limits). Refund an amount off one

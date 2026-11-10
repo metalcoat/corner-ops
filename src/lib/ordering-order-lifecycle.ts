@@ -31,6 +31,8 @@ import { compareKitchenItems } from "@/lib/ordering-line-format";
 import { ensureRestaurantPlatformSchema } from "@/lib/restaurant-platform";
 import { notifyPosStationsOfOnlineOrder } from "@/lib/push-notifications";
 import { abandonedReopenRestoreStatus, effectiveReopen } from "@/lib/ordering-reopen-policy";
+import { pendingLineEdits, reopenedSentItemIds } from "@/lib/ordering-sent-lines";
+import { changedTicketLines } from "@/lib/ordering-line-edit-rules";
 
 export type StoredOrderStatus =
   | "draft"
@@ -146,8 +148,9 @@ export async function reopenOrderForAdditions(
         await sql`SELECT details FROM ordering_order_events WHERE order_id=${orderId} AND event_type='order_reopened_for_additions' AND NOT EXISTS(SELECT 1 FROM ordering_order_events later WHERE later.order_id=${orderId} AND later.event_type='order_addition_submitted' AND later.created_at>ordering_order_events.created_at) ORDER BY created_at DESC LIMIT 1`
       )[0];
       const details = effectiveReopen(openReopen?.details as { existingItemIds?: string[]; previousStatus?: string } | undefined);
+      // Lines edited since the reopen stand in for the sent lines they replaced.
       if (details)
-        return { order, orderItemIds: (details.existingItemIds || []).map(String) };
+        return { order, orderItemIds: (await reopenedSentItemIds({ id: orderId, status: "draft", submitted_at: true })) || (details.existingItemIds || []).map(String) };
       // A never-sent draft is simply opened for editing. Logging a reopen here
       // made Send/payment treat it as an add-on to an order the kitchen never
       // received (no kitchen ticket, inventory depletion, or loyalty).
@@ -786,12 +789,18 @@ async function runDraftSubmit(
     await revalidateDraft(order);
     // Preflight: every send rule above passed; roll back the repricing and stop.
     if (preflight) throw new DraftPreflightPassed();
+    // Edited lines print as a short CHANGED ticket, not as a void plus a new item.
+    const edits = reopenDetails && reopenRows[0] ? await pendingLineEdits(orderId, reopenRows[0].created_at) : { sentReplacementIds: [], changes: [] };
+    const sentIds = new Set([...existingIds, ...edits.sentReplacementIds]);
+    const printItemIds = addedItemIds.filter((id) => !sentIds.has(id));
     const ticketLines = reopenDetails
-      ? (addedItemIds.length ? await snapshotAndFormatOrder(orderId, addedItemIds) : [])
+      ? (printItemIds.length ? await snapshotAndFormatOrder(orderId, printItemIds) : [])
       : await snapshotAndFormatOrder(orderId);
+    for (const change of edits.changes) ticketLines.push(...changedTicketLines(change.before, change.after));
     for (const event of adjustmentEvents) {
       const details = (event.details || {}) as Record<string, unknown>;
-      if (event.event_type === "order_item_cancelled")
+      // The kitchen never saw a line voided before it was sent; an edit's void is in its CHANGED lines.
+      if (event.event_type === "order_item_cancelled" && details.via !== "line_edit" && sentIds.has(String(details.itemId)))
         ticketLines.push(`VOID/REMOVE: ${Number(details.quantity || 1)}x ${String(details.itemName || "ITEM").toUpperCase()}`);
       if (event.event_type === "order_fulfillment_changed")
         ticketLines.push(details.from === details.to ? "DELIVERY ADDRESS CHANGED" : `SERVICE CHANGE: ${String(details.from || "").toUpperCase()} -> ${String(details.to || "").toUpperCase()}`);
@@ -829,14 +838,15 @@ async function runDraftSubmit(
       VALUES (${randomUUID()}, ${orderId}, ${updated[0].version}, 'status_changed', ${actor.type}, ${actor.id},
               CAST(${JSON.stringify({ from: "draft", to: "sent_to_kitchen", actorName: actor.name })} AS jsonb))
     `;
-    await sql`
+    // A reopen whose only changes the kitchen never saw (a line added then voided) has nothing to print.
+    if (!reopenDetails || ticketLines.length) await sql`
       INSERT INTO ordering_print_jobs (
         id, business, order_id, purpose, event_subtype, status, is_reprint, actor_type, actor_id, error_message, payload
       ) VALUES (
         ${randomUUID()}, ${business}, ${orderId}, 'kitchen_production', ${reopenDetails ? "order_addition" : "initial_send"}, 'not_configured', ${Boolean(reopenDetails)},
         ${actor.type}, ${actor.id}, 'Kitchen printer not configured.',
         CAST(${JSON.stringify({
-          heading: reopenDetails ? "ADD ON" : "KITCHEN ORDER",
+          heading: reopenDetails ? (printItemIds.length ? "ADD ON" : "ORDER CHANGE") : "KITCHEN ORDER",
           orderNumber: String(order.display_number),
           customerName,
           phone: String(order.phone_snapshot || ""),

@@ -76,6 +76,7 @@ export async function getOrderDetail(business: OrderingBusiness, id: string) {
   order.items = await sql`SELECT * FROM ordering_order_items WHERE order_id=${id} ORDER BY sort_order,created_at`;
   for (const item of order.items) {
     item.modifiers = await sql`SELECT * FROM ordering_order_item_modifiers WHERE order_item_id=${item.id} ORDER BY created_at`;
+    item.combo_selections = await sql`SELECT combo_id,group_id,option_id,combo_name_snapshot,option_name_snapshot FROM ordering_order_item_combo_selections WHERE order_item_id=${item.id} ORDER BY created_at,id`;
   }
   order.events = await sql`SELECT event.event_type,event.actor_type,event.actor_id,event.details,event.created_at,COALESCE(NULLIF(event.details->>'actorName',''),employee.name,event.actor_id) actor_name FROM ordering_order_events event LEFT JOIN employees employee ON employee.id::text=event.actor_id WHERE event.order_id=${id} ORDER BY event.created_at`;
   const payments = await sql`SELECT payment.created_at,payment.transaction_type,payment.tender_type,payment.amount_cents,payment.brand,payment.last4,payment.reason,payment.details->>'via' via,COALESCE(NULLIF(payment.details->>'actorName',''),employee.name,NULLIF(payment.created_by,''),'Unknown') taken_by

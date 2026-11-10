@@ -21,6 +21,7 @@
     "src/lib/local-dev-tools.ts",
     "src/lib/pos-offline-sync-policy.ts",
     "src/lib/ordering-check-math.ts",
+    "src/lib/ordering-line-edit-rules.ts",
     "src/lib/ordering-hours-math.ts",
     "src/lib/business-day.ts",
     "src/lib/busy-times.ts",

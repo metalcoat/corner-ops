@@ -10,8 +10,9 @@ export class CheckConflictError extends Error {}
 
 async function refreshCheckTotals(orderId: string) {
   const sql = getSql();
+  // Voided quantities are off the checks (cancelOrderItem takes them off), so checks split what's left.
   const items =
-    await sql`SELECT id,quantity,line_total_cents FROM ordering_order_items WHERE order_id=${orderId} ORDER BY sort_order,created_at,id`;
+    await sql`SELECT id,quantity-cancelled_quantity quantity,ROUND(line_total_cents::numeric*(quantity-cancelled_quantity)/quantity)::integer line_total_cents FROM ordering_order_items WHERE order_id=${orderId} AND quantity>cancelled_quantity ORDER BY sort_order,created_at,id`;
   for (const item of items) {
     const assignments = await sql`
       SELECT assignment.check_id,assignment.quantity,checks.display_sequence
@@ -81,7 +82,7 @@ export async function ensureInitialCheck(
       check = (
         await sql`INSERT INTO ordering_checks(id,business,order_id,display_sequence,total_cents,amount_due_cents,created_by) VALUES(${id},${business},${orderId},1,${order.total_cents},${order.total_cents},${actor.id}) RETURNING *`
       )[0];
-      await sql`INSERT INTO ordering_check_line_assignments(check_id,order_item_id,quantity,allocated_cents) SELECT ${id},id,quantity,line_total_cents FROM ordering_order_items WHERE order_id=${orderId}`;
+      await sql`INSERT INTO ordering_check_line_assignments(check_id,order_item_id,quantity,allocated_cents) SELECT ${id},id,quantity-cancelled_quantity,ROUND(line_total_cents::numeric*(quantity-cancelled_quantity)/quantity)::integer FROM ordering_order_items WHERE order_id=${orderId} AND quantity>cancelled_quantity`;
     }
     return check;
   });
@@ -174,7 +175,7 @@ export async function splitCheckEvenly(input: {
       const total = base + (remainder-- > 0 ? 1 : 0);
       await sql`INSERT INTO ordering_checks(id,business,order_id,display_sequence,total_cents,amount_due_cents,created_by) VALUES(${checkId},${input.business},${input.orderId},${sequence},${total},${total},${input.actor.id})`;
       if (sequence === 1)
-        await sql`INSERT INTO ordering_check_line_assignments(check_id,order_item_id,quantity,allocated_cents) SELECT ${checkId},id,quantity,line_total_cents FROM ordering_order_items WHERE order_id=${input.orderId}`;
+        await sql`INSERT INTO ordering_check_line_assignments(check_id,order_item_id,quantity,allocated_cents) SELECT ${checkId},id,quantity-cancelled_quantity,ROUND(line_total_cents::numeric*(quantity-cancelled_quantity)/quantity)::integer FROM ordering_order_items WHERE order_id=${input.orderId} AND quantity>cancelled_quantity`;
     }
     return { checks: await listChecks(input.orderId, input.business) };
   });
@@ -199,7 +200,7 @@ export async function assignChecks(input: {
     if (Number(order.paid_cents) > 0)
       throw new CheckConflictError("The order cannot be split after payment has started.");
     const items =
-      await sql`SELECT id,quantity,line_total_cents FROM ordering_order_items WHERE order_id=${input.orderId} ORDER BY sort_order,created_at,id`;
+      await sql`SELECT id,quantity-cancelled_quantity quantity,ROUND(line_total_cents::numeric*(quantity-cancelled_quantity)/quantity)::integer line_total_cents FROM ordering_order_items WHERE order_id=${input.orderId} AND quantity>cancelled_quantity ORDER BY sort_order,created_at,id`;
     const expected = new Map(items.map((item) => [String(item.id), Number(item.quantity)]));
     const assigned = new Map<string, number>();
     for (const check of requestedChecks) {
@@ -253,4 +254,19 @@ export async function listChecks(orderId: string, business: OrderingBusiness) {
     WHERE assignment.check_id=${check.id} ORDER BY item.sort_order,item.created_at,item.id
   `;
   return checks;
+}
+
+/** Lines added to an order that already has checks go on the first check, which takes up the new total. */
+export async function assignNewItemsToPrimaryCheck(orderId: string, orderItemIds: string[]) {
+  const sql = getSql();
+  const checks = await sql`SELECT id,paid_cents,total_cents FROM ordering_checks WHERE order_id=${orderId} ORDER BY display_sequence,id`;
+  if (!checks.length) return;
+  const primary = checks[0];
+  for (const itemId of orderItemIds) {
+    const item = (await sql`SELECT quantity,line_total_cents FROM ordering_order_items WHERE id=${itemId}`)[0];
+    if (item) await sql`INSERT INTO ordering_check_line_assignments(check_id,order_item_id,quantity,allocated_cents) VALUES(${primary.id},${itemId},${item.quantity},${item.line_total_cents}) ON CONFLICT(check_id,order_item_id) DO UPDATE SET quantity=EXCLUDED.quantity,allocated_cents=EXCLUDED.allocated_cents`;
+  }
+  const order = (await sql`SELECT total_cents FROM ordering_orders WHERE id=${orderId}`)[0];
+  const otherTotal = checks.slice(1).reduce((sum, row) => sum + Number(row.total_cents), 0), primaryTotal = Math.max(0, Number(order.total_cents) - otherTotal);
+  await sql`UPDATE ordering_checks SET total_cents=${primaryTotal},amount_due_cents=GREATEST(0,${primaryTotal}-paid_cents),status=CASE WHEN paid_cents=0 THEN 'open' WHEN paid_cents>=${primaryTotal} THEN 'paid' ELSE 'partially_paid' END,updated_at=NOW() WHERE id=${primary.id}`;
 }

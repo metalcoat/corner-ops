@@ -49,6 +49,7 @@ import {
 } from "@/lib/gift-card-input";
 import { consolidateQuantities } from "@/lib/cart-line-consolidation";
 import { queueOfflineOrder } from "@/lib/pos-offline-queue";
+import { savedLineConfiguration, type SavedComboRow, type SavedModifierRow } from "@/lib/ordering-line-edit-rules";
 import MxKeyedPaymentDialog,{type MxPaymentInitialization} from "@/components/mx-keyed-payment-dialog";
 import "@/components/mx-keyed-payment-dialog.css";
 import MxTerminalPaymentDialog,{type MxTerminalSale} from "@/components/mx-terminal-payment-dialog";
@@ -76,6 +77,14 @@ type CartLine = {
   /** Typed in by staff: no menu item behind it. */
   customItem?: boolean;
 };
+
+/** A saved line's modifier as staff read it: a default taken off is "NO Classic Sauce", not "Classic Sauce". */
+function savedModifierLabel(modifier: SavedModifierRow & { name_snapshot?: string | null }) {
+  const name = modifier.option_name_snapshot || modifier.name_snapshot || "";
+  if (modifier.selection_state === "removed") return `NO ${name}`;
+  if (modifier.selection_state === "declined_included") return `NO ${modifier.group_name_snapshot || "included choice"}`;
+  return name;
+}
 
 function cartLineConfiguration(line: CartLine) {
   const {
@@ -129,19 +138,23 @@ type CashSettlementPrompt = {
 };
 type ReopenedOrderItem = {
   id: string;
+  item_id: string;
+  variant_id?: string | null;
+  custom_item?: boolean;
   item_name_snapshot: string;
   variant_name_snapshot?: string | null;
   quantity: number;
   cancelled_quantity?: number;
   line_total_cents: number;
   special_instructions?: string | null;
-  modifiers?: Array<{
+  modifiers?: Array<SavedModifierRow & {
     id: string;
-    option_name_snapshot?: string | null;
     name_snapshot?: string | null;
-    print_on_ticket?: boolean;
   }>;
+  combo_selections?: SavedComboRow[];
 };
+/** EDIT on a saved line, after its new choices were picked: quantity, reason and PIN before it's saved. */
+type SavedLineEdit = { line: ReopenedOrderItem; item: CartLine; mutationId: string; quantity: number; reason: string; pin: string; error: string; busy: boolean; askPin: boolean };
 type OpenTikiTab = {
   id: string;
   display_number: string;
@@ -590,6 +603,15 @@ export default function PosClient({
   const [reopenedItems, setReopenedItems] = useState<ReopenedOrderItem[]>([]);
   const [reopenedCancelItem, setReopenedCancelItem] =
     useState<ReopenedOrderItem | null>(null);
+  // EDIT on a saved line: the line whose choices are open in the item screen, then the save dialog.
+  const [editingSavedLine, setEditingSavedLine] = useState<ReopenedOrderItem | null>(null);
+  const [savedLineEdit, setSavedLineEdit] = useState<SavedLineEdit | null>(null);
+  // VOID inside the payment window: the line being voided there, with its reason and PIN.
+  const [checkoutVoid, setCheckoutVoid] = useState<{ line: ReopenedOrderItem; reason: string; pin: string; error: string; busy: boolean } | null>(null);
+  // Closing the item screen without saving ends the edit.
+  useEffect(() => {
+    if (!configuringItem) setEditingSavedLine(null);
+  }, [configuringItem]);
   // The order loaded from POS → Orders: who it's for and what's been paid, plus its void dialog.
   const [reopenedOrder, setReopenedOrder] = useState<Record<string, any> | null>(null);
   const [customItemOpen, setCustomItemOpen] = useState(false);
@@ -620,6 +642,84 @@ export default function PosClient({
           }
         : current,
     );
+    return payload.order as Record<string, any>;
+  }
+  /** EDIT on a saved line: the item screen opens with the choices it was rung with. */
+  function startSavedLineEdit(line: ReopenedOrderItem, picked?: CartLine) {
+    const item = menu.flatMap((category) => category.items).find((candidate) => candidate.id === line.item_id);
+    if (!item) {
+      setCheckoutError("This menu item changed and can no longer be edited. Void it and ring it again.");
+      return;
+    }
+    const config = savedLineConfiguration(line);
+    setEditingSavedLine(line);
+    openItem(item, picked || { ...config, id: line.id, name: line.item_name_snapshot, variantName: line.variant_name_snapshot || "", unitPriceCents: 0, modifierText: [], comboText: [] });
+  }
+  async function saveSavedLineEdit() {
+    const edit = savedLineEdit;
+    if (!edit || !savedDraft) return;
+    setSavedLineEdit({ ...edit, busy: true, error: "" });
+    try {
+      const { item } = edit;
+      const response = await fetch(`/api/ordering/order-center/${encodeURIComponent(savedDraft.id)}/items/edit`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          itemId: edit.line.id, reason: edit.reason, managerPin: edit.pin || undefined, clientMutationId: edit.mutationId,
+          item: { itemId: item.itemId, variantId: item.variantId, quantity: edit.quantity, modifierSelections: item.modifierSelections, modifierQuantities: item.modifierQuantities, modifierAmounts: item.modifierAmounts, modifierDeclines: item.modifierDeclines, pizzaToppings: item.pizzaToppings, comboId: item.comboId, comboSelections: item.comboSelections, specialInstructions: item.specialInstructions },
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        setSavedLineEdit((current) => current && { ...current, busy: false, error: body.error || "The item change could not be saved.", askPin: current.askPin || response.status === 403 });
+        return;
+      }
+      // The new version stands in for a line the kitchen has, so it shows (and voids) as sent.
+      if (body.sent) setSavedDraft((current) => current ? { ...current, orderItemIds: [...current.orderItemIds.filter((id) => id !== edit.line.id), String(body.newItemId)] } : current);
+      setSavedLineEdit(null);
+      await refreshReopenedOrder(savedDraft.id);
+      setCartNotice(body.sent ? `${edit.line.item_name_snapshot} changed. The kitchen gets a CHANGED ticket when you SEND or take payment.` : `${edit.line.item_name_snapshot} changed.`);
+    } catch (error) {
+      setSavedLineEdit((current) => current && { ...current, busy: false, error: error instanceof Error ? error.message : "The item change could not be saved." });
+    }
+  }
+  /** VOID inside the payment window: the line comes off, the amount due updates, and checkout stays open. */
+  async function voidInCheckout() {
+    const pending = checkoutVoid;
+    if (!pending || !savedDraft) return;
+    setCheckoutVoid({ ...pending, busy: true, error: "" });
+    try {
+      const line = pending.line, quantity = Number(line.quantity) - Number(line.cancelled_quantity || 0);
+      const url = `/api/ordering/order-center/${encodeURIComponent(savedDraft.id)}/items/cancel`;
+      const quoteResponse = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "quote", itemId: line.id, quantity }) });
+      const quote = await quoteResponse.json();
+      if (!quoteResponse.ok) throw new Error(quote.error || "The item could not be priced.");
+      if (Number(quote.refundRequiredCents) > 0) throw new Error("This item was already paid for. Close checkout and use VOID on the order to refund it.");
+      const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ itemId: line.id, quantity, reason: pending.reason, managerPin: pending.pin || undefined, clientMutationId: clientId() }) });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "The item could not be voided.");
+      setCheckoutVoid(null);
+      const order = await refreshReopenedOrder(savedDraft.id);
+      const left = (order.items || []).filter((row: ReopenedOrderItem) => Number(row.quantity) > Number(row.cancelled_quantity || 0));
+      if (!left.length) {
+        // Nothing left to pay for: offer to void the whole order instead.
+        setCheckoutOpen(false);
+        setCheckoutMoreOpen(false);
+        setVoidOrderReason(pending.reason);
+        setVoidOrderPin(pending.pin);
+        setVoidOrderError("");
+        setVoidOrderOpen(true);
+        return;
+      }
+      const checksResponse = await fetch(`/api/ordering/orders/${encodeURIComponent(savedDraft.id)}/checks`);
+      const checksPayload = (await checksResponse.json()) as { checks?: PayableCheck[] };
+      if (checksResponse.ok && checksPayload.checks?.length) setPayableChecks(checksPayload.checks);
+      const checkId = checksPayload.checks?.some((check) => check.id === selectedCheckId) ? selectedCheckId : checksPayload.checks?.[0]?.id;
+      if (checkId) await selectCheck(checkId);
+      setCheckoutError("");
+    } catch (error) {
+      setCheckoutVoid((current) => current && { ...current, busy: false, error: error instanceof Error ? error.message : "The item could not be voided." });
+    }
   }
   function addCustomItem() {
     const quantity = Number(customItem.quantity), unitPriceCents = Math.round(Number(customItem.price || 0) * 100);
@@ -2111,6 +2211,15 @@ export default function PosClient({
       comboSelections: cloneSelections(comboSelections),
       specialInstructions: specialInstructions.trim(),
     };
+    if (editingSavedLine) {
+      setSavedLineEdit({ line: editingSavedLine, item: line, mutationId: clientId(), quantity: Number(editingSavedLine.quantity) - Number(editingSavedLine.cancelled_quantity || 0), reason: "", pin: "", error: "", busy: false, askPin: false });
+      setEditingSavedLine(null);
+      setConfiguringItem(null);
+      setWingSidePromptOpen(false);
+      setSelectedVariantId("");
+      setEditingLineId(null);
+      return;
+    }
     setCart((current) =>
       editingLineId
         ? current.map((candidate) =>
@@ -2809,7 +2918,8 @@ export default function PosClient({
           label: row.label,
           discountCents: Number(row.discount_cents),
         })),
-        orderItemIds: (payload.orderItems || []).map((row) => row.id),
+        // A reopened order keeps the lines the kitchen had; the additions just saved are not sent yet.
+        orderItemIds: reopenedDraft ? reopenedDraft.orderItemIds : (payload.orderItems || []).map((row) => row.id),
         loyalty: [],
         reopened: Boolean(reopenedDraft),
         originalServiceType: reopenedDraft?.originalServiceType,
@@ -4699,8 +4809,7 @@ export default function PosClient({
                       .filter((modifier) => modifier.print_on_ticket !== false)
                       .map((modifier) => (
                         <small key={modifier.id}>
-                          {modifier.option_name_snapshot ||
-                            modifier.name_snapshot}
+                          {savedModifierLabel(modifier)}
                         </small>
                       ))}
                     {line.special_instructions && (
@@ -4708,6 +4817,15 @@ export default function PosClient({
                     )}
                     <div className="posReopenedLineFooter">
                       <small>{reopenedLineSent(line.id) ? "SENT TO KITCHEN" : "NOT SENT YET"}</small>
+                      {!line.custom_item && (
+                        <button
+                          type="button"
+                          className="posLineEdit"
+                          onClick={() => startSavedLineEdit(line)}
+                        >
+                          EDIT
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => setReopenedCancelItem(line)}
@@ -5262,6 +5380,36 @@ export default function PosClient({
           </section>
         </div>
       )}
+      {savedLineEdit && savedDraft?.reopened && (() => {
+        const edit = savedLineEdit, sent = reopenedLineSent(edit.line.id), needPin = (sent && !canManageOrders) || edit.askPin;
+        const was = [edit.line.variant_name_snapshot, ...(edit.line.modifiers || []).filter((modifier) => modifier.print_on_ticket !== false).map(savedModifierLabel), edit.line.special_instructions ? `Note: ${edit.line.special_instructions}` : ""].filter(Boolean).join(" · ");
+        const now = [edit.item.variantName, ...edit.item.modifierText, ...edit.item.comboText, edit.item.specialInstructions ? `Note: ${edit.item.specialInstructions}` : ""].filter(Boolean).join(" · ");
+        return (
+          <div className="posModalBackdrop" role="presentation">
+            <section className="posCustomerDialog posReopenedVoidDialog" role="dialog" aria-modal="true" aria-label={`Change ${edit.line.item_name_snapshot}`}>
+              <form className="ocItemCancel posLineEditSave" onSubmit={(event) => { event.preventDefault(); void saveSavedLineEdit(); }}>
+                <h3>Change {edit.line.item_name_snapshot}</h3>
+                <p><b>Was</b> {Number(edit.line.quantity) - Number(edit.line.cancelled_quantity || 0)}× {was || "no options"} · {money(Number(edit.line.line_total_cents))}</p>
+                <p><b>Now</b> {edit.quantity}× {now || "no options"} · {money(edit.item.unitPriceCents * edit.quantity)}</p>
+                <div className="posQtyControls" role="group" aria-label="Quantity">
+                  <button type="button" disabled={edit.quantity <= 1} onClick={() => setSavedLineEdit({ ...edit, quantity: edit.quantity - 1 })}>−</button>
+                  <span>{edit.quantity}</span>
+                  <button type="button" disabled={edit.quantity >= 99} onClick={() => setSavedLineEdit({ ...edit, quantity: edit.quantity + 1 })}>+</button>
+                </div>
+                {sent ? <p className="ocVoidNotice">The kitchen already has this item. They get a short CHANGED ticket when you SEND or take payment.</p> : <p className="ocVoidNotice">Not sent yet: nothing prints until you SEND.</p>}
+                {sent && <label>Reason<input autoFocus maxLength={500} value={edit.reason} onChange={(event) => setSavedLineEdit({ ...edit, reason: event.target.value, error: "" })} /></label>}
+                {needPin && <label>Manager PIN<input type="password" inputMode="numeric" autoComplete="off" maxLength={4} value={edit.pin} onChange={(event) => setSavedLineEdit({ ...edit, pin: event.target.value, error: "" })} /></label>}
+                {edit.error && <p className="ocDialogError" role="alert">{edit.error}</p>}
+                <div>
+                  <button type="button" disabled={edit.busy} onClick={() => setSavedLineEdit(null)}>BACK</button>
+                  <button type="button" disabled={edit.busy} onClick={() => { setSavedLineEdit(null); startSavedLineEdit(edit.line, edit.item); }}>CHANGE CHOICES</button>
+                  <button className="primary" disabled={edit.busy || (sent && edit.reason.trim().length < 3) || (needPin && edit.pin.length < 4)}>{edit.busy ? "SAVING…" : "SAVE CHANGE"}</button>
+                </div>
+              </form>
+            </section>
+          </div>
+        );
+      })()}
       {customItemOpen && (
         <div className="posModalBackdrop" role="presentation">
           <section className="posCustomerDialog posReopenedVoidDialog" role="dialog" aria-modal="true" aria-label="Custom item">
@@ -5562,6 +5710,54 @@ export default function PosClient({
                 {Number(checkoutState?.order.paid_cents || 0) > 0 ? ` · Paid ${money(Number(checkoutState?.order.paid_cents))}` : ""}
               </small>
             </div>
+            {savedDraft?.reopened && reopenedOrder?.id === savedDraft.id && (
+              <section className="posCheckoutItems" aria-label="Items on this order">
+                {reopenedItems
+                  .filter((line) => Number(line.quantity) > Number(line.cancelled_quantity || 0))
+                  .map((line) => {
+                    const sent = reopenedLineSent(line.id);
+                    const voiding = checkoutVoid?.line.id === line.id ? checkoutVoid : null;
+                    return (
+                      <div key={line.id} className={voiding ? "isVoiding" : undefined}>
+                        <div className="posCheckoutItemRow">
+                          <span>
+                            {Number(line.quantity) - Number(line.cancelled_quantity || 0)}× {line.item_name_snapshot}
+                            {line.variant_name_snapshot ? ` · ${line.variant_name_snapshot}` : ""}
+                            <small>{sent ? "SENT" : "NOT SENT"}</small>
+                          </span>
+                          <b>{money(Math.round(Number(line.line_total_cents) * (Number(line.quantity) - Number(line.cancelled_quantity || 0)) / Number(line.quantity)))}</b>
+                          <button
+                            type="button"
+                            className="posCheckoutItemVoid"
+                            disabled={paymentBusy || Boolean(mxTerminalSale) || Boolean(checkoutVoid?.busy)}
+                            onClick={() => setCheckoutVoid(voiding ? null : { line, reason: "", pin: "", error: "", busy: false })}
+                          >
+                            {voiding ? "KEEP" : "VOID"}
+                          </button>
+                        </div>
+                        {voiding && (
+                          <form className="posCheckoutItemVoidForm" onSubmit={(event) => { event.preventDefault(); void voidInCheckout(); }}>
+                            {sent && <p>The kitchen already has this item.{!canManageOrders ? " Manager PIN needed." : ""}</p>}
+                            <div className="posCheckoutVoidReasons" role="group" aria-label="Void reason">
+                              {["Customer changed mind", "Rang in wrong", "Out of item"].map((reason) => (
+                                <button type="button" key={reason} className={voiding.reason === reason ? "selected" : ""} onClick={() => setCheckoutVoid({ ...voiding, reason, error: "" })}>{reason}</button>
+                              ))}
+                            </div>
+                            <input aria-label="Void reason" placeholder="Reason" maxLength={500} value={voiding.reason} onChange={(event) => setCheckoutVoid({ ...voiding, reason: event.target.value, error: "" })} />
+                            {sent && !canManageOrders && (
+                              <input aria-label="Manager PIN" placeholder="Manager PIN" type="password" inputMode="numeric" autoComplete="off" maxLength={4} value={voiding.pin} onChange={(event) => setCheckoutVoid({ ...voiding, pin: event.target.value, error: "" })} />
+                            )}
+                            {voiding.error && <p className="ocDialogError" role="alert">{voiding.error}</p>}
+                            <button className="danger" disabled={voiding.busy || voiding.reason.trim().length < 3 || (sent && !canManageOrders && voiding.pin.length < 4)}>
+                              {voiding.busy ? "VOIDING…" : `VOID ${line.item_name_snapshot.toUpperCase()}`}
+                            </button>
+                          </form>
+                        )}
+                      </div>
+                    );
+                  })}
+              </section>
+            )}
             {Number(checkoutState?.order.paid_cents || 0) === 0 && (
               <button type="button" className="posSplitOrderButton" disabled={paymentBusy} onClick={openSplitOrder}>
                 {payableChecks.length > 1 ? "EDIT SPLIT ORDER" : "SPLIT ORDER"}
