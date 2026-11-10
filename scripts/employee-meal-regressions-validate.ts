@@ -42,8 +42,12 @@ async function main() {
     assert.equal(line.variant_id,largeId); assert.equal(line.variant_name_snapshot,'Large'); assert.equal(line.unit_price_cents,2000);
     const movements=await sql`SELECT delta_quantity,source,details FROM ordering_inventory_movements WHERE inventory_item_id=${inventoryId}`;
     assert.equal(movements.length,1); assert.equal(Number(movements[0].delta_quantity),-1); assert.equal(movements[0].source,'employee_meal');
-    assert.equal((await employeeMealEligibility({business:"Corner Deli",actor})).eligible,false);
-    console.log(JSON.stringify({variantPriceAndSizePreserved:true,failedSubmissionRollsBackMealAndInventory:true,concurrentMealLimit:true,singleStockDepletion:true}));
+    assert.match((await employeeMealEligibility({business:"Corner Deli",actor})).error,/already been recorded/);
+    // Without a published 6-hour shift the reason must name the shift rule, not a used meal; the POS shows this text as-is.
+    await sql`UPDATE schedule_shifts SET status='Draft' WHERE id=${shiftId}`;
+    const noShift=await employeeMealEligibility({business:"Corner Deli",actor});
+    assert.equal(noShift.eligible,false); assert.match(noShift.error,/published shift/); assert.doesNotMatch(noShift.error,/already/);
+    console.log(JSON.stringify({noShiftReasonIsShiftRule:true,variantPriceAndSizePreserved:true,failedSubmissionRollsBackMealAndInventory:true,concurrentMealLimit:true,singleStockDepletion:true}));
   } finally {
     await sql`DELETE FROM ordering_inventory_movements WHERE inventory_item_id=${inventoryId}`;
     await sql`DELETE FROM ordering_print_jobs WHERE order_id IN(SELECT id FROM ordering_orders WHERE created_by=${employeeId})`;
