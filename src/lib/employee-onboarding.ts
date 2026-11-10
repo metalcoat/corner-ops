@@ -26,10 +26,11 @@ import { assertEmployeePinAvailable, createEmployeePinRecord, isEmployeePinUniqu
 import { recordEmployeePinAudit } from "@/lib/employee-pin-audit";
 import { validateEmployeePin } from "@/lib/employee-pin";
 import { getCornerDeliHandbook } from "@/lib/employee-handbook";
+import { i9DocumentsComplete } from "@/lib/i9-document-rules";
 import { assignOnboardingPacket, assignRateChange, getEmploymentFormProfile } from "@/lib/employment-forms";
 import { ensureEmployeeDirectDepositElection } from "@/lib/direct-deposit";
 import { ConflictError, ValidationError } from "@/lib/http";
-import { tippedRateProblem } from "@/lib/ny-tipped-wage";
+import { nyFoodServiceRates, tippedRateProblem } from "@/lib/ny-tipped-wage";
 import { normalizeSmsPhone } from "@/lib/phone";
 import { employeeKey } from "@/lib/payroll-relief-timesheet";
 import { deliverSms } from "@/lib/sms-notifications";
@@ -142,8 +143,14 @@ export async function createOnboardingEmployee(input: {
   const position = normalizePosition(input.business, input.position || (input.business === "Tiki" ? "Bartender" : "Pizza"));
   const roleGroup = roleGroupForPosition(input.business, position);
   const hourlyRate = Math.max(0, Number(input.hourlyRate || 0));
-  const tippedRate = Math.max(0, Number(input.tippedRate || 0));
-  const rateProblem = tippedRateProblem({ tippedRateCents: Math.round(tippedRate * 100), hourlyRateCents: Math.round(hourlyRate * 100), year: new Date().getFullYear() });
+  // Every Corner Deli hire gets both rates (regular and driver/tipped), driving or not, so the two-rate pay notice
+  // with the overtime-by-job agreement is signed up front. Blank driver rate = the tip-credit cash minimum.
+  const year = new Date().getFullYear();
+  const tippedRate = input.business === "Corner Deli"
+    ? Math.max(0, Number(input.tippedRate || 0)) || nyFoodServiceRates(year).cashWageCents / 100
+    : Math.max(0, Number(input.tippedRate || 0));
+  if (hourlyRate > 0 && Math.round(hourlyRate * 100) < nyFoodServiceRates(year).minimumCents) throw new ValidationError(`The regular rate can't be under $${(nyFoodServiceRates(year).minimumCents / 100).toFixed(2)}, New York's ${year} minimum wage here.`);
+  const rateProblem = tippedRateProblem({ tippedRateCents: Math.round(tippedRate * 100), hourlyRateCents: Math.round(hourlyRate * 100), year });
   if (rateProblem) throw new ValidationError(rateProblem);
 
   const duplicate = await sql`SELECT id, active FROM employees WHERE business = ${input.business} AND LOWER(BTRIM(name)) = LOWER(${name}) LIMIT 1` as unknown as Array<{ id: string; active: boolean }>;
@@ -323,13 +330,14 @@ async function onboardingFacts(business: Business, employeeId: string): Promise<
   const sql = getSql();
   const employee = await employeeRow(business, employeeId);
   const handbook = getCornerDeliHandbook();
-  const [invites, forms, handbookRows, deposits, signIns, relief] = await Promise.all([
+  const [invites, forms, handbookRows, deposits, signIns, relief, i9Docs] = await Promise.all([
     sql`SELECT * FROM employee_onboarding_invites WHERE business = ${business} AND employee_id = ${employeeId} ORDER BY created_at DESC LIMIT 1` as unknown as Promise<InviteRow[]>,
     sql`SELECT form_type, status FROM employment_forms WHERE business = ${business} AND employee_id = ${employeeId} AND status <> 'Superseded'` as unknown as Promise<Array<{ form_type: string; status: string }>>,
     sql`SELECT 1 FROM employee_handbook_acknowledgments WHERE employee_id = ${employeeId} AND business = ${business} AND handbook_version = ${handbook.version} AND content_hash = ${handbook.contentHash} LIMIT 1` as unknown as Promise<unknown[]>,
     sql`SELECT status FROM direct_deposit_elections WHERE business = ${business} AND employee_id = ${employeeId} AND status <> 'Superseded'` as unknown as Promise<Array<{ status: string }>>,
     sql`SELECT COUNT(*)::int n FROM employee_onboarding_invites WHERE employee_id = ${employeeId} AND app_signed_in_at IS NOT NULL` as unknown as Promise<Array<{ n: number }>>,
     payrollReliefMatch(business, employee.name),
+    sql`SELECT DISTINCT d.document_list FROM employment_form_documents d JOIN employment_forms f ON f.id = d.form_id WHERE f.employee_id = ${employeeId} AND f.business = ${business} AND f.form_type = 'I9' AND f.status <> 'Superseded' AND d.deleted_at IS NULL` as unknown as Promise<Array<{ document_list: "A" | "B" | "C" }>>,
   ]);
   const invite = invites[0] || null;
   const signed = forms.filter((form) => form.status !== "Assigned");
@@ -351,6 +359,8 @@ async function onboardingFacts(business: Business, employeeId: string): Promise<
     payrollReliefApplies: relief.applies,
     payrollReliefEeNum: relief.eeNum,
     hourlyRateSet: Number(employee.hourly_rate) > 0,
+    i9Assigned: forms.some((form) => form.form_type === "I9"),
+    i9DocumentsUploaded: i9DocumentsComplete(i9Docs.map((row) => row.document_list)),
   };
 }
 
@@ -457,7 +467,8 @@ export async function sendOnboardingReminders(now = new Date()) {
 /** Pay tab: save the rate and send the NY new-hire pay notice that Add employee held back. */
 export async function sendNewHirePayNotice(input: { business: Business; employeeId: string; hourlyRate: number; tippedRate: number; actor: string; actorName: string }) {
   const hourlyRate = Number(input.hourlyRate);
-  const tippedRate = Math.max(0, Number(input.tippedRate || 0));
+  // Corner Deli: everyone has both rates; a missing driver rate becomes the tip-credit cash minimum.
+  const tippedRate = Math.max(0, Number(input.tippedRate || 0)) || (input.business === "Corner Deli" ? nyFoodServiceRates(new Date().getFullYear()).cashWageCents / 100 : 0);
   if (!Number.isFinite(hourlyRate) || hourlyRate <= 0) throw new ValidationError("Enter the hourly rate.");
   const rateProblem = tippedRateProblem({ tippedRateCents: Math.round(tippedRate * 100), hourlyRateCents: Math.round(hourlyRate * 100), year: new Date().getFullYear() });
   if (rateProblem) throw new ValidationError(rateProblem);

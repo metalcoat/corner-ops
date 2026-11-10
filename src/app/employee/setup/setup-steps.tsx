@@ -6,6 +6,7 @@ import "./setup.css";
 
 const STEP_LINKS: Record<string, { href: string; label: string }> = {
   forms: { href: "/employee/forms", label: "Open my forms" },
+  i9docs: { href: "/employee/forms", label: "Add I-9 document copies" },
   handbook: { href: "/employee/handbook", label: "Read & sign the handbook" },
   deposit: { href: "/employee/direct-deposit", label: "Set up direct deposit" },
 };

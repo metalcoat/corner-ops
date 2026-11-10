@@ -123,6 +123,20 @@ function encryptPayload(payload: Record<string, unknown>): string {
   return `v1.${iv.toString("base64url")}.${tag.toString("base64url")}.${encrypted.toString("base64url")}`;
 }
 
+/** Encrypts an uploaded form file (I-9 document copies) with the same key as form payloads. */
+export function encryptFormFile(bytes: Buffer): { data: Buffer; iv: string; tag: string } {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", encryptionKey(), iv);
+  const data = Buffer.concat([cipher.update(bytes), cipher.final()]);
+  return { data, iv: iv.toString("base64url"), tag: cipher.getAuthTag().toString("base64url") };
+}
+
+export function decryptFormFile(data: Buffer, iv: string, tag: string): Buffer {
+  const decipher = createDecipheriv("aes-256-gcm", encryptionKey(), Buffer.from(iv, "base64url"));
+  decipher.setAuthTag(Buffer.from(tag, "base64url"));
+  return Buffer.concat([decipher.update(data), decipher.final()]);
+}
+
 function decryptPayload(value: string): Record<string, unknown> {
   const [version, ivValue, tagValue, encryptedValue] = value.split(".");
   if (version !== "v1" || !ivValue || !tagValue || !encryptedValue) throw new Error("Employment form payload is invalid.");

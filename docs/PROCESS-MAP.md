@@ -519,6 +519,14 @@ flowchart LR
   sent a setup link are unaffected. Store-side items (I-9 review, Payroll Relief match) don't block scheduling.
 - "Schedule app" is done once they sign in with their PIN from the app or Hub (`app_signed_in_at`, migration 0042,
   set by `POST /api/employee/session`). Payroll Relief's step shows only where its tables exist (not production yet).
+- I-9 copies (2026-11-10): after signing Section 1 the employee uploads photos/PDFs of the documents they chose
+  (List A, or List B + List C; never specific ones) on their I-9 under Forms. Files are AES-256-GCM encrypted with
+  the forms key before storage (`employment_form_documents`, migration 0060, `src/lib/i9-documents.ts`). Managers with
+  the sensitive-forms permission see them next to Section 2 on Paperwork (each view audited). Copies don't replace
+  examining the originals in person within 3 business days. "I-9 document copies" is a checklist step.
+- Two rates for every Corner Deli hire: Add employee and the Pay tab default a blank driver rate to the tip-credit
+  cash minimum ($10.70 in 2026), so the two-rate LS55 with both overtime rates and the agreement is always signed.
+  A regular rate under the minimum wage is refused.
 - A link works for one person only; a resend revokes the older link. After the PIN is chosen the link needs that
   person's PIN to show the checklist again. Nothing is uploaded to Payroll Relief.
 - Call-outs (handbook section 2): text the manager 4+ hours ahead, then "I need coverage" on the shift in the team app

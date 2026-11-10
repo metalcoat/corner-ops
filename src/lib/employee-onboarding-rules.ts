@@ -77,6 +77,10 @@ export type OnboardingFacts = {
   payrollReliefEeNum: string | null;
   payrollReliefApplies: boolean;
   hourlyRateSet: boolean;
+  /** An I-9 is assigned; its document copies are a step of their own. */
+  i9Assigned?: boolean;
+  /** Copies cover List A, or List B + List C. */
+  i9DocumentsUploaded?: boolean;
 };
 
 /** The manager's per-hire checklist, in the order the new hire works through it. */
@@ -102,6 +106,7 @@ export function onboardingChecklist(facts: OnboardingFacts): OnboardingStep[] {
       ? "No forms assigned. Complete the employer profile on Paperwork, then assign the packet."
       : `${facts.formsSigned} of ${facts.formsAssigned} signed${facts.formsAwaitingEmployer ? `; ${facts.formsAwaitingEmployer} need your I-9 review` : ""}.`,
   });
+  if (facts.i9Assigned) steps.push({ key: "i9docs", label: "I-9 document copies", status: facts.i9DocumentsUploaded ? "done" : "waiting", detail: facts.i9DocumentsUploaded ? "Uploaded. Still examine the originals in person within 3 business days of their first day." : "Not uploaded yet (List A, or List B + List C, their choice)." });
   if (!facts.hourlyRateSet) steps.push({ key: "pay", label: "Pay rate notice", status: "manager", detail: "Set the hourly rate, then send the NY pay notice from Paperwork." });
   if (facts.handbookRequired) steps.push({ key: "handbook", label: "Handbook", status: facts.handbookAcknowledged ? "done" : "waiting", detail: facts.handbookAcknowledged ? "Read and signed." : "Not signed yet." });
   steps.push({
@@ -140,6 +145,7 @@ export function employeeOnboardingSteps(facts: OnboardingFacts): OnboardingStep[
       detail: !facts.formsAssigned ? "Your manager hasn't assigned your forms yet." : `${facts.formsSigned} of ${facts.formsAssigned} done: W-4, IT-2104, I-9 and the rest.`,
     },
   ];
+  if (facts.i9Assigned) steps.push({ key: "i9docs", label: "I-9 document copies", status: facts.i9DocumentsUploaded ? "done" : "waiting", detail: facts.i9DocumentsUploaded ? "Uploaded. Bring the originals on your first day." : "On your I-9 under Forms: photos of one List A document, or one List B and one List C. You choose which." });
   if (facts.handbookRequired) steps.push({ key: "handbook", label: "Employee handbook", status: facts.handbookAcknowledged ? "done" : "waiting", detail: facts.handbookAcknowledged ? "Signed." : "Read it and sign at the bottom." });
   steps.push({ key: "deposit", label: "Direct deposit (optional)", status: facts.directDeposit === "completed" ? "done" : "optional", detail: facts.directDeposit === "completed" ? "Submitted." : "Get paid straight to your bank account, or skip this." });
   steps.push({ key: "app", label: "Schedule app", status: facts.appSignIns > 0 ? "done" : "waiting", detail: facts.appSignIns > 0 ? "You're signed in on the app." : "Install the app and sign in with your PIN." });

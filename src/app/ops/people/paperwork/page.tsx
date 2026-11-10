@@ -2,6 +2,7 @@
 
 import { responseMessage } from "@/app/client-http";
 import CompletedFormView from "./completed-form-view";
+import I9DocumentReview from "./i9-document-review";
 import { canViewCompletedEmploymentForms } from "@/lib/employment-form-display";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
@@ -304,6 +305,7 @@ export default function EmploymentFormsPage() {
         </section>
 
         <section className="employmentAuditTrail"><p className="eyebrow">Audit trail</p>{review.events?.length ? review.events.map((entry, index) => <article key={`${entry.createdAt}-${entry.action}-${index}`}><div><strong>{auditAction(entry.action)}</strong><span>{dateTimeLabel(entry.createdAt)}</span></div><p>{entry.actor}</p>{entry.metadata.reason ? <small>{String(entry.metadata.reason)}</small> : null}</article>) : <p>No audit events were recorded.</p>}</section>
+        {review.formType === "I9" && review.status !== "Assigned" && <I9DocumentReview business={business} formId={review.id} canView={canViewCompleted} />}
         {review.formType === "I9" && review.status === "Employer Review" && <form className="employmentAdminForm employmentI9Form" onSubmit={completeI9}>
           <div className="wide employmentWarning">Examine documents selected by the employee. Do not demand a particular List A, B, or C document. Record either one acceptable List A document or an acceptable List B plus List C combination.</div>
           <label>Document method<select name="documentMethod" required><option value="">Choose method</option><option value="List A">List A</option><option value="List B and C">List B and List C</option><option value="Acceptable receipt">Acceptable receipt</option></select></label>

@@ -219,7 +219,7 @@ function TeamMember() {
         <h2>Pay rates</h2>
         <form className="peopleAddForm" onSubmit={(event) => { event.preventDefault(); void savePay(event.currentTarget, false); }} key={`${employee.hourlyRate}-${employee.tippedRate}`}>
           <label>Hourly rate<input name="hourlyRate" type="number" min="0" step="0.01" defaultValue={employee.hourlyRate} /></label>
-          <label>{business === "Corner Deli" ? "Delivery tipped rate" : "Tipped hourly rate"}<input name="tippedRate" type="number" min="0" step="0.01" defaultValue={employee.tippedRate} /></label>
+          <label>{business === "Corner Deli" ? "Delivery tipped rate" : "Tipped hourly rate"}<input name="tippedRate" type="number" min="0" step="0.01" defaultValue={employee.tippedRate} placeholder={business === "Corner Deli" ? "10.70" : ""} /></label>
           <div className="controlActions">
             <button className="primary" disabled={busy}>Save rates</button>
             <button type="button" disabled={busy} onClick={(event) => { const form = event.currentTarget.form; if (form) void savePay(form, true); }}>Save & send NY pay notice</button>
