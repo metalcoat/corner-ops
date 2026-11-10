@@ -109,6 +109,25 @@ leave kiosk mode / back to kiosk mode, Android settings, install update, check f
 POS › Settings › Car tablet › **Unpair** revokes its token immediately; the tablet drops back to its pairing screen
 the next time it talks to the server. Pair again to give it a new token.
 
+## Car power: screen on when the car starts (app 1.2.0)
+
+The car's USB power is on the ignition. When power connects the app turns the screen on, comes to the front and
+dismisses the lock screen without a swipe; it keeps the screen on while plugged in and lets it time out and lock once
+unplugged. Pressing the power button also goes straight to the app. Not during overnight quiet time.
+
+The app never shows itself over a secure lock. A PIN-locked tablet goes straight in only while Extend Unlock trusts the
+car's Bluetooth; otherwise the PIN pad comes up at once (no swipe first). On a tablet that isn't device owner (Galaxy
+Tab A11+), set up once:
+
+- **Settings › Lock screen and AOD › Screen lock type:** PIN (or *None*, which also removes the swipe but leaves
+  customer names/addresses open to anyone in the car).
+- **Settings › Lock screen and AOD › Extend Unlock (Smart Lock) › Trusted devices:** add the car's Bluetooth.
+- **Settings › Apps › Corner Ops Car › Battery:** *Unrestricted*; also Battery › Background usage limits ›
+  *Never sleeping apps*.
+- **Settings › Apps › Corner Ops Car › Notifications:** allowed, and *Full screen notifications* (Apps › Special
+  access) on. The app asks for this once a day until it's on; the staff menu has a shortcut.
+- Optional: Developer options › *Stay awake* (screen on whenever charging, even without the app in front).
+
 ## Notes
 
 - Data use: GPS uploads are a few KB every 10 s while driving; photos are ~0.3–1 MB each.

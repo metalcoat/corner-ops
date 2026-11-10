@@ -19,8 +19,8 @@ android {
         applicationId = "com.cornerdeli.cartablet"
         minSdk = 29
         targetSdk = 36
-        versionCode = 6
-        versionName = "1.1.1"
+        versionCode = 7
+        versionName = "1.2.0"
         buildConfigField("String", "DEFAULT_SERVER", "\"https://dev.ordercornerdeli.com\"")
     }
 

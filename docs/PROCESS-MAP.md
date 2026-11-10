@@ -629,6 +629,12 @@ flowchart LR
   in the complex with a 3-digit unit (unit line, "Apt/#/Unit 153" or "Belmont Courts 153"; the complex's own "436" is
   not a unit) shows "Bldg 151–158 · Court 100" on the tablet and route cards, and Navigate, route stops and GPS stops use
   that building.
+- Car power (app 1.2.0, 2026-11-10; owner: the car's USB power is on the ignition): power connected = car started,
+  so the tablet (`CarPower.kt`) turns the screen on, brings the app forward and dismisses the lock screen with no swipe;
+  the screen stays on while plugged in and times out/locks normally when unplugged; the power button also skips the
+  swipe. Never during quiet time. A secure lock is never bypassed: Extend Unlock (trusted car Bluetooth) or no PIN →
+  straight in; PIN and not trusted → the PIN pad comes up at once. Without device owner (the Galaxy Tab A11+,
+  SM-X238U) the app opens itself through a full-screen notification (Android blocks background activity starts).
 - Heartbeat every 30 s (battery, charging, network, signal, app version, queue sizes); online = heard from in 90 s.
   Shown on the store dashboard strip and the settings page.
 - Data use (app 1.0.2, 2026-10-29, the SIM has ~3 GB/month): the tablet reloads its delivery list only when

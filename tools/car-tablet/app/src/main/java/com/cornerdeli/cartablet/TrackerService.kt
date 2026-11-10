@@ -6,6 +6,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -15,7 +16,6 @@ import android.location.Location
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.BatteryManager
-import android.os.PowerManager
 import android.os.Build
 import android.telephony.TelephonyManager
 import androidx.core.app.NotificationCompat
@@ -47,6 +47,12 @@ class TrackerService : LifecycleService() {
     private var commandThread: Thread? = null
     private var lastHeartbeatAt = 0L
     private var locationOn = false
+    /** Ignition-switched car power: plugged in = car started (CarPower). */
+    private val power = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == Intent.ACTION_POWER_CONNECTED && !app.status.quiet) CarPower.wakeApp(context, "car-started")
+        }
+    }
     private val handledCommands = object : LinkedHashMap<String, Boolean>() {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?) = size > 100
     }
@@ -66,6 +72,8 @@ class TrackerService : LifecycleService() {
         scheduler.scheduleWithFixedDelay({ safely { heartbeat() } }, 1, 30, TimeUnit.SECONDS)
         scheduler.scheduleWithFixedDelay({ safely { checkForUpdate() } }, 20, 6 * 3600, TimeUnit.SECONDS)
         commandThread = Thread(::commandLoop, "car-commands").apply { isDaemon = true; start() }
+        // Android 8+ doesn't deliver power connected to manifest receivers; this service is always running.
+        ContextCompat.registerReceiver(this, power, IntentFilter(Intent.ACTION_POWER_CONNECTED), ContextCompat.RECEIVER_NOT_EXPORTED)
         Watchdog.schedule(this)
     }
 
@@ -181,11 +189,7 @@ class TrackerService : LifecycleService() {
             location.start(); locationOn = true; lastKept = null
             // Morning: screen back on, on the app.
             Kiosk.nightOver(this)
-            @Suppress("DEPRECATION")
-            runCatching {
-                getSystemService(PowerManager::class.java).newWakeLock(PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE, "cornerops:morning").acquire(10_000)
-                startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            }
+            if (CarPower.plugged(this)) CarPower.wakeApp(this, "morning")
         }
     }
 
@@ -316,6 +320,7 @@ class TrackerService : LifecycleService() {
 
     override fun onDestroy() {
         running = false
+        runCatching { unregisterReceiver(power) }
         if (::location.isInitialized) location.stop()
         scheduler.shutdownNow()
         commandThread?.interrupt()

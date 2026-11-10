@@ -27,6 +27,9 @@ class Prefs(context: Context) {
     var batteryPrompted: Long
         get() = sp.getLong("batteryPrompted", 0)
         set(value) = sp.edit().putLong("batteryPrompted", value).apply()
+    var fullScreenPrompted: Long
+        get() = sp.getLong("fullScreenPrompted", 0)
+        set(value) = sp.edit().putLong("fullScreenPrompted", value).apply()
 
     val paired get() = !token.isNullOrBlank()
 }

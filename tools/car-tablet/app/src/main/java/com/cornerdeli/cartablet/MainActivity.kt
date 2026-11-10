@@ -4,7 +4,10 @@ import android.Manifest
 import android.app.Activity
 import android.app.ActivityManager
 import android.app.AlertDialog
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
@@ -19,6 +22,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -28,6 +32,7 @@ import android.widget.TextView
 import android.speech.tts.TextToSpeech
 import java.util.Locale
 import android.window.OnBackInvokedDispatcher
+import androidx.core.content.ContextCompat
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -80,6 +85,18 @@ class MainActivity : Activity() {
     private var pairServer: String? = null
     private var pairCode: String? = null
 
+    /** Car power (ignition-switched USB) and the screen being turned on: see CarPower. */
+    private val power = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.action) {
+                Intent.ACTION_POWER_CONNECTED -> { keepAwakeWhileCharging(true); wakeUp() }
+                Intent.ACTION_POWER_DISCONNECTED -> keepAwakeWhileCharging(false)
+                // Power button: straight to the app (or the PIN pad), no swipe.
+                Intent.ACTION_SCREEN_ON -> CarPower.dismissLockScreen(this@MainActivity)
+            }
+        }
+    }
+
     private val tick = object : Runnable {
         override fun run() {
             renderStatus()
@@ -111,6 +128,9 @@ class MainActivity : Activity() {
         app.prefs.lastDeliveries?.let { runCatching { deliveries = JSONObject(it).optJSONArray("deliveries") ?: JSONArray() } }
         buildFrame()
         Kiosk.apply(this)
+        val powerEvents = IntentFilter().apply { addAction(Intent.ACTION_POWER_CONNECTED); addAction(Intent.ACTION_POWER_DISCONNECTED); addAction(Intent.ACTION_SCREEN_ON) }
+        ContextCompat.registerReceiver(this, power, powerEvents, ContextCompat.RECEIVER_NOT_EXPORTED)
+        if (intent.getBooleanExtra(CarPower.EXTRA_WAKE, false)) wakeUp()
         // Back (button or gesture) does nothing in the car.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT) {}
@@ -119,7 +139,33 @@ class MainActivity : Activity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleLink(intent)
+        if (intent.getBooleanExtra(CarPower.EXTRA_WAKE, false)) wakeUp()
         if (screen == "pair") show("pair")
+    }
+
+    /** Car started: screen on and the lock screen out of the way (never over a PIN lock; see CarPower). */
+    private fun wakeUp() {
+        if (app.status.quiet) return
+        setTurnScreenOn(true)
+        CarPower.dismissLockScreen(this)
+    }
+
+    /** Screen stays on while the car runs (plugged in); unplugged it times out and locks normally. Not overnight. */
+    private fun keepAwakeWhileCharging(plugged: Boolean = CarPower.plugged(this)) {
+        if (plugged && !app.status.quiet) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+
+    /**
+     * Without device owner the app opens itself on car power through a full-screen notification, which
+     * Android 14+ lets the user switch off. Asked once a day until allowed. True when the settings page is up.
+     */
+    private fun askFullScreenNotice(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE || CarPower.canOpenItself(this)) return false
+        if (System.currentTimeMillis() - app.prefs.fullScreenPrompted < 24 * 3600_000L) return false
+        app.prefs.fullScreenPrompted = System.currentTimeMillis()
+        app.toast("Allow full screen notifications so the app opens when the car starts")
+        return runCatching { startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName"))); true }.getOrDefault(false)
     }
 
     private fun handleLink(intent: Intent?) {
@@ -133,12 +179,19 @@ class MainActivity : Activity() {
         TrackerService.start(this, withCamera = true)
         // Android's permission and battery dialogs can't open inside lock task, so lock only once they're done.
         val needsBatteryPrompt = !asking && askBatteryExemption()
+        if (!asking && !needsBatteryPrompt) askFullScreenNotice()
         if (Kiosk.isDeviceOwner(this) && !staffUnlocked && !asking && !needsBatteryPrompt && !inLockTask()) runCatching { startLockTask() }
         lastTouchAt = System.currentTimeMillis()
+        inFront = true
+        CarPower.clearNotice(this)
+        keepAwakeWhileCharging()
         main.post(tick)
     }
 
     override fun onPause() {
+        inFront = false
+        // Turn the screen on only for the wake that asked for it.
+        setTurnScreenOn(false)
         main.removeCallbacks(tick)
         super.onPause()
     }
@@ -287,6 +340,7 @@ class MainActivity : Activity() {
         })
         // Dim the screen overnight; normal brightness otherwise.
         window.attributes = window.attributes.apply { screenBrightness = if (which == "quiet") 0.05f else -1f }
+        keepAwakeWhileCharging()
     }
 
     private fun quietView(): View {
@@ -473,10 +527,13 @@ class MainActivity : Activity() {
         show(if (feedDriver == null && app.status.driverName == null) "signin" else "main")
     }
 
-    private companion object {
+    companion object {
         /** Corner Deli, 828 Morris St. */
-        const val DELI_LAT = 44.69365
-        const val DELI_LNG = -75.48202
+        private const val DELI_LAT = 44.69365
+        private const val DELI_LNG = -75.48202
+        /** Resumed and on screen (CarPower skips the "Car started" notification then). */
+        @Volatile var inFront = false
+            private set
     }
 
     private fun say(text: String) { if (ttsReady) tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "nav") }
@@ -565,6 +622,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        runCatching { unregisterReceiver(power) }
         tts?.shutdown()
         super.onDestroy()
     }
@@ -664,6 +722,10 @@ class MainActivity : Activity() {
         val options = mutableListOf<Pair<String, () -> Unit>>()
         if (staffUnlocked) options += "Back to kiosk mode" to { staffUnlocked = false; if (Kiosk.isDeviceOwner(this)) runCatching { startLockTask() } }
         else options += "Leave kiosk mode (until 'Back to kiosk')" to { staffUnlocked = true; runCatching { stopLockTask() } }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && !CarPower.canOpenItself(this)) options += "Allow opening when the car starts (full screen notifications)" to {
+            staffUnlocked = true; runCatching { stopLockTask() }
+            startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName")))
+        }
         options += "Android settings" to { staffUnlocked = true; runCatching { stopLockTask() }; startActivity(Intent(Settings.ACTION_SETTINGS)) }
         app.status.updateUrl?.let { url -> options += "Install update ${app.status.updateVersion}" to { installUpdate(url) } }
         options += "Check for app update" to {
