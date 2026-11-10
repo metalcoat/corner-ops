@@ -696,7 +696,7 @@ flowchart LR
   took it and when where recorded. A customer can still pay by card at any time; a paid order drops off. Select all takes every listed order (any driver); each settled order keeps
   its driver (`ordering_driver_cash_settlement_orders.driver_employee_id`, migration 0059). A short cash-out needs a
   manager and a reason (settlement `notes`). Driver cash goes in the back drawer: the `back-register` till must be
-  open, and its expected cash rises by the cash kept (`driver_turn_in` movement; anything over is handed back).
+  set up and open (the screen warns "No till ready" and CASH OUT is disabled otherwise; the server refuses too), and its expected cash rises by the cash kept (`driver_turn_in` movement; anything over is handed back).
   Check: `npm run test:driver-cash`.
 - Close: START BLIND CLOSE COUNT → how many of each coin/bill (pennies … $100) plus a checks total, and for a till with
   a change bag a second count of the bag; the POS adds it up (drawer cash + checks vs expected) and flags fewer than 30

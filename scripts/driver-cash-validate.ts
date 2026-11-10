@@ -29,9 +29,15 @@ async function main(){
     await assert.rejects(()=>postDriverCashSettlement(driver,{orderIds:[orderId],turnedInCashCents:0,businessDate:"2026-08-25"}),/manager must approve/);result.shortCashOutNeedsManager=true;
     // Driver cash goes in the back drawer; the back till has to be open.
     const backTill=(await sql`INSERT INTO ordering_pos_terminals(id,business,name,terminal_key,terminal_type,location_label,allow_cash)VALUES(${randomUUID()},'Corner Deli','back-register','back-register','pos','Back pos 1',TRUE) ON CONFLICT(business,terminal_key) DO UPDATE SET active=TRUE RETURNING id`)[0],sessionId=randomUUID();
+    await sql`UPDATE ordering_pos_terminals SET active=FALSE WHERE id=${backTill.id}`;
+    assert.match(String((await driverCashDashboard(driver)).tillProblem),/No till is set/);
+    await assert.rejects(()=>postDriverCashSettlement(driver,{orderIds:[orderId],turnedInCashCents:2500,businessDate:"2026-08-25"}),/No till is set/);result.noTillBlocksCashOut=true;
+    await sql`UPDATE ordering_pos_terminals SET active=TRUE WHERE id=${backTill.id}`;
     await sql`UPDATE ordering_register_sessions SET status='closed',closed_at=NOW() WHERE terminal_id=${backTill.id} AND status<>'closed'`;
-    await assert.rejects(()=>postDriverCashSettlement(driver,{orderIds:[orderId],turnedInCashCents:2500,businessDate:"2026-08-25"}),/Open the back till/);result.backTillMustBeOpen=true;
+    assert.match(String((await driverCashDashboard(driver)).tillProblem),/back till is not open/);
+    await assert.rejects(()=>postDriverCashSettlement(driver,{orderIds:[orderId],turnedInCashCents:2500,businessDate:"2026-08-25"}),/back till is not open/);result.backTillMustBeOpen=true;
     await sql`INSERT INTO ordering_register_sessions(id,business,terminal_id,status,opening_cash_cents,expected_cash_cents,opened_by)VALUES(${sessionId},'Corner Deli',${backTill.id},'open',0,0,'validation')`;
+    assert.equal((await driverCashDashboard(driver)).tillProblem,null);
     const posted=await postDriverCashSettlement(driver,{orderIds:[orderId],turnedInCashCents:2600,businessDate:"2026-08-25"});
     assert.equal(posted.expectedCashCents,2500);assert.equal(posted.overShortCents,100);
     const order=(await sql`SELECT payment_status,amount_due_cents FROM ordering_orders WHERE id=${orderId}`)[0],settlement=(await sql`SELECT status,order_count,expected_cash_cents,turned_in_cash_cents,over_short_cents,created_by,approved_by FROM ordering_driver_cash_settlements WHERE id=${posted.id}`)[0];
