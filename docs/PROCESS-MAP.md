@@ -505,6 +505,12 @@ flowchart LR
   backup `cornerops-20261106T204005Z.dump`. Rollback: put the before-copy back as `release`, tag the before image
   `:latest`, `up -d --no-deps app` (new tables are ignored by the old code). Reminders ride production's
   existing 5-minute schedule-delivery crontab entry.
+- **Production hand deploy 2026-11-10 (Chris: "go"):** driver rate + two rates for every hire, tip credit fix, second
+  overtime rule (Payroll "Overtime by role", weighted average without agreement), overtime agreement + "Send overtime
+  agreement to drivers", scheduler overtime hint, I-9 copies with delete-after-Section-2. Not included: call-outs,
+  employee drinks, draft handbook sections, TipOT export (Payroll Relief runs from staging/dev code). Migrations 0046
+  and 0060 applied by hand and recorded. Rollback: `production/release-before-hr-batch` back as `release`, tag
+  `corner-ops-prod-app:before-hr-batch` as `:latest`, `up -d --no-deps app`. Backup `cornerops-20261110T144855Z.dump`.
 - Code: `src/lib/employee-onboarding.ts` (database), `employee-onboarding-rules.ts` (token, text, checklist),
   APIs `/api/employee-directory/onboarding` (managers, workforce permission) and `/api/employee/onboarding` (the link).
 - Text log-only: no Telnyx settings, or `ONBOARDING_SMS_LOG_ONLY=true`; numbers in `SMS_TEST_NUMBERS` still send.

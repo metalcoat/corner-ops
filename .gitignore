@@ -19,3 +19,7 @@ tools/car-tablet/build/
 tools/car-tablet/app/build/
 tools/car-tablet/.gradle/
 tools/car-tablet/local.properties
+
+# Python bytecode caches
+__pycache__/
+*.pyc
