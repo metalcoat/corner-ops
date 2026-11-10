@@ -16,6 +16,8 @@ import {
   type EmploymentFormProfile,
 } from "@/lib/employment-forms";
 import { sendStaffNotification } from "@/lib/staff-notifications";
+import { deleteI9CopiesAfterVerification } from "@/lib/i9-documents";
+import { recordAuditEvent } from "@/lib/audit";
 import { redactEmploymentSensitiveData } from "@/lib/sensitive-redaction";
 import { employerI9ValidationErrors } from "@/lib/i9-validation";
 import type { Business } from "@/lib/types";
@@ -252,7 +254,10 @@ export async function POST(request: NextRequest) {
         payload,
         ...metadata,
       });
-      return NextResponse.json({ form });
+      // Originals were examined in person; the uploaded copies are no longer kept.
+      const copies = await deleteI9CopiesAfterVerification(business, String(body.id || ""));
+      if (copies.deleted) await recordAuditEvent({ business, action: "i9-copies-deleted-after-verification", actor: session.email, entityType: "employment_form", entityId: String(body.id || ""), details: { deleted: copies.deleted } });
+      return NextResponse.json({ form, copiesDeleted: copies.deleted });
     }
 
     if (action === "unassign") {

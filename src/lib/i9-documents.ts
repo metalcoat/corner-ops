@@ -3,7 +3,7 @@ import { getSql } from "@/lib/db";
 import { decryptFormFile, encryptFormFile } from "@/lib/employment-forms";
 import { I9_DOCUMENT_CHOICES, I9_MAX_DOCUMENTS, i9DocumentsComplete, i9FileProblem, type I9DocumentList } from "@/lib/i9-document-rules";
 import { ValidationError } from "@/lib/http";
-import { get, put } from "@/lib/storage";
+import { del, get, put } from "@/lib/storage";
 import type { Business } from "@/lib/types";
 
 type DocumentRow = { id: string; form_id: string; employee_id: string; business: Business; document_list: I9DocumentList; document_title: string; file_name: string; content_type: string; size_bytes: number; storage_url: string; encryption_iv: string; encryption_tag: string; uploaded_at: string };
@@ -65,4 +65,18 @@ export async function readI9Document(input: { business: Business; documentId: st
   if (!stored?.stream) throw new ValidationError("The stored copy is missing.");
   const encrypted = Buffer.from(await new Response(stored.stream).arrayBuffer());
   return { bytes: decryptFormFile(encrypted, row.encryption_iv, row.encryption_tag), contentType: row.content_type, fileName: row.file_name || `${row.document_title}` };
+}
+
+/**
+ * Once the employer has examined the originals and completed Section 2, the copies are deleted (Chris,
+ * 2026-11-10), for every employee alike. The I-9 itself is kept; the rows stay as a record of what was uploaded.
+ */
+export async function deleteI9CopiesAfterVerification(business: Business, formId: string) {
+  const rows = await getSql()`
+    UPDATE employment_form_documents SET deleted_at = NOW()
+    WHERE form_id = ${formId} AND business = ${business} AND deleted_at IS NULL
+    RETURNING storage_url
+  ` as unknown as Array<{ storage_url: string }>;
+  for (const row of rows) await del(row.storage_url).catch((error) => console.error("[i9-documents] copy delete failed", error));
+  return { deleted: rows.length };
 }

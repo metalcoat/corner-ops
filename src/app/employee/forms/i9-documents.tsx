@@ -2,7 +2,7 @@
 
 import { responseMessage } from "@/app/client-http";
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { I9_DOCUMENT_CHOICES, type I9DocumentList } from "@/lib/i9-document-rules";
+import { I9_BRING_ORIGINALS, I9_DOCUMENT_CHOICES, type I9DocumentList } from "@/lib/i9-document-rules";
 
 type Doc = { id: string; list: I9DocumentList; title: string; fileName: string; uploadedAt: string };
 
@@ -70,8 +70,10 @@ export default function I9Documents({ formId, locked }: { formId: string; locked
 
   return <div className="employmentSection i9Documents">
     <h3>Copies of your I-9 documents</h3>
-    <p>Add photos of the documents you will show your manager. <strong>You choose which documents to use</strong>: either one document from List A, or one from List B and one from List C. Bring the originals on your first day; your manager has to look at them in person.</p>
-    {complete ? <p className="i9DocsDone">✓ Your copies are uploaded. Bring the originals to work.</p> : <p className="i9DocsTodo">Not finished: {choice === "A" ? "one List A document" : "one List B and one List C document"}.</p>}
+    <p>Add photos of the documents you will show your manager. <strong>You choose which documents to use</strong>: either one document from List A, or one from List B and one from List C. </p>
+    <p className="i9DocsTodo">{I9_BRING_ORIGINALS}</p>
+    {complete ? <p className="i9DocsDone">✓ Your copies are uploaded. Bring the originals with you on your first day.</p> : <p className="i9DocsTodo">Not finished: {choice === "A" ? "one List A document" : "one List B and one List C document"}.</p>}
+    {locked && <p>Your manager has checked your original documents, so your uploaded copies were deleted.</p>}
     {docs.length > 0 && <ul>{docs.map((doc) => <li key={doc.id}>List {doc.list}: {doc.title} <a href={`/api/employee/forms/documents?id=${encodeURIComponent(doc.id)}`} target="_blank" rel="noreferrer">view</a>{!locked && <button type="button" disabled={busy} onClick={() => void remove(doc.id)}>Remove</button>}</li>)}</ul>}
     {!locked && <>
       <div className="i9DocsChoice">

@@ -26,4 +26,7 @@ export function i9DocumentsComplete(lists: I9DocumentList[]): boolean {
   return lists.includes("A") || (lists.includes("B") && lists.includes("C"));
 }
 
-export const I9_COPY_NOTE = "Copies don't replace Section 2: a manager must examine the original documents in person within 3 business days of the first day of work (unless the store uses E-Verify's remote alternative procedure). If copies are kept, keep them for every employee, not just some, and keep them with the I-9.";
+export const I9_COPY_NOTE = "Copies don't replace Section 2: the new hire brings the original documents on their first day and you examine them in person (within 3 business days of the first day of work at the latest). When you complete Section 2, the uploaded copies are deleted automatically, for every employee the same way; the I-9 itself is kept.";
+
+/** What new hires are told about the originals. */
+export const I9_BRING_ORIGINALS = "On your first day, bring the original documents you uploaded. Your manager has to see them in person; after that the copies are deleted.";

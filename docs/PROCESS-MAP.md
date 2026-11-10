@@ -522,8 +522,9 @@ flowchart LR
 - I-9 copies (2026-11-10): after signing Section 1 the employee uploads photos/PDFs of the documents they chose
   (List A, or List B + List C; never specific ones) on their I-9 under Forms. Files are AES-256-GCM encrypted with
   the forms key before storage (`employment_form_documents`, migration 0060, `src/lib/i9-documents.ts`). Managers with
-  the sensitive-forms permission see them next to Section 2 on Paperwork (each view audited). Copies don't replace
-  examining the originals in person within 3 business days. "I-9 document copies" is a checklist step.
+  the sensitive-forms permission see them next to Section 2 on Paperwork (each view audited). New hires are told to
+  bring the originals on day 1; completing Section 2 (Chris examined the originals) deletes the copy files for every
+  employee alike (`deleteI9CopiesAfterVerification`, audited); the I-9 is kept. "I-9 document copies" is a checklist step.
 - Two rates for every Corner Deli hire: Add employee and the Pay tab default a blank driver rate to the tip-credit
   cash minimum ($10.70 in 2026), so the two-rate LS55 with both overtime rates and the agreement is always signed.
   A regular rate under the minimum wage is refused.
