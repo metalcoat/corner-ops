@@ -317,7 +317,7 @@ export async function supplierCostAction(body: Record<string, unknown>, actorNam
     // Turn the recommended split into draft purchase orders, one per supplier.
     const plan = (await supplierCostDashboard(body.mode === "week" ? "week" : "order")).analysis.best;
     if (!plan?.orders.length) throw new SupplierCostError("There is nothing to order yet.");
-    return withTransaction(async () => {
+    return withTransaction(async () => { const sql = getSql();
       const ids: string[] = [];
       for (const order of plan.orders) {
         const id = randomUUID();
@@ -389,7 +389,7 @@ export async function importPrices(supplierId: string, text: string) {
   if (products.length > 20_000) throw new SupplierCostError("That file is too big; split it into parts under 20,000 lines.");
   const sql = getSql();
   let saved = 0, created = 0, catalog = { seen: 0, priceChanges: 0, offersUpdated: 0 };
-  await withTransaction(async () => {
+  await withTransaction(async () => { const sql = getSql();
     catalog = await ingestCatalog(supplierId, products, fullExport ? "export" : "paste");
     for (const product of products) {
       let item = (await sql`SELECT id,base_unit FROM ordering_inventory_items WHERE business=${BUSINESS} AND lower(name)=lower(${product.description})`)[0];

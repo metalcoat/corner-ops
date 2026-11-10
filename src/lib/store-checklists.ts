@@ -281,7 +281,7 @@ export async function saveSetupEntry(input: {
   const id = input.id ? String(input.id) : "";
   const active = input.active === undefined ? true : Boolean(input.active);
   const sql = getSql();
-  return withTransaction(async () => {
+  return withTransaction(async () => { const sql = getSql();
     if (kind === "list") {
       const hour = parseOpensAtHour(input.opensAtHour ?? 4);
       if (id) {

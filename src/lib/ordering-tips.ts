@@ -141,7 +141,7 @@ export async function tipAction(
     )[0];
   }
   if (action === "payout")
-    return withTransaction(async () => {
+    return withTransaction(async () => { const sql = getSql();
       const employeeId = body.employeeId ? String(body.employeeId) : null,
         periodStart = body.periodStart ? String(body.periodStart) : null,
         periodEnd = body.periodEnd ? String(body.periodEnd) : null,
@@ -157,7 +157,7 @@ export async function tipAction(
       return { id, totalCents: total, employeeCount: count };
     });
   if (action === "reverse_payout")
-    return withTransaction(async () => {
+    return withTransaction(async () => { const sql = getSql();
       const id = String(body.id || ""),
         batch = (
           await sql`UPDATE ordering_tip_payout_batches SET status='reversed',reversed_at=NOW() WHERE id=${id} AND business='Corner Deli' AND status='posted' RETURNING *`
