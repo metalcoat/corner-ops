@@ -244,7 +244,7 @@ state. The production data/configuration observations in the original rehearsal 
 - [ ] Verify live customer SMS and email delivery, Google sign-in and provider configuration on the intended public origin.
 
 **Production `.env`** (must be checked at cutover): `APP_ENV=production`, `MX_MERCHANT_ID`, `MX_CONSUMER_KEY`,
-`MX_CONSUMER_SECRET`, `MX_BUSINESS_ID`, **`MX_ENVIRONMENT=production`**, `PAYMENT_PROVIDER`,
+`MX_CONSUMER_SECRET`, **`MX_ENVIRONMENT=production`**, `PAYMENT_PROVIDER`,
 `CUSTOMER_APP_URL`, `GOOGLE_CLIENT_ID/SECRET`, `ADDRESS_PROVIDER`, `GOOGLE_MAPS_API_KEY`,
 `DELI_ORIGIN_LATITUDE/LONGITUDE`, and `TELNYX_*` for sign-in codes. Email needs `SMTP_USER`/`SMTP_PASSWORD`
 and the intended SMTP/from settings (`CUSTOMER_EMAIL_FROM`), or `RESEND_API_KEY` with

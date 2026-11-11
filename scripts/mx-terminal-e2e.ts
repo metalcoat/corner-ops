@@ -62,7 +62,7 @@ async function main() {
   const sql = getSql();
   const startedAt = new Date();
   const standIn = await startMxStandIn();
-  const station = (await sql`SELECT * FROM ordering_payment_stations WHERE business='Corner Deli' AND station_mode='payment' AND active=TRUE LIMIT 1`)[0];
+  const station = (await sql`SELECT * FROM ordering_payment_stations WHERE business='Corner Deli' AND station_mode='payment' AND active=TRUE ORDER BY (payment_terminal_id IS NULL),name LIMIT 1`)[0];
   const location = (await sql`SELECT id FROM ordering_hardware_locations WHERE business='Corner Deli' ORDER BY created_at LIMIT 1`)[0];
   const employee = (await sql`SELECT id,name,position,pos_role FROM employees WHERE id=${EMPLOYEE_ID} AND business='Corner Deli' AND active=TRUE AND pin_enabled=TRUE`)[0];
   if (!station || !location || !employee) throw new Error("The dev database needs a Corner Deli payment station, a hardware location, and the fixture manager.");

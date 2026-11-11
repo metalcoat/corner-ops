@@ -723,7 +723,11 @@ flowchart LR
 - Till closeout (`/pos/deli/register`, `src/lib/ordering-registers.ts`): managers reach it from the "Till closeout" tile on the POS home
   screen (Manager) or POS → Reports → TILL CLOSEOUT / REGISTER. Each POS station's
   `shared_register_key` is its till (`ordering_pos_terminals.terminal_key`); on dev: `upfront-register` (station
-  Upfront) = front, and `back-register` (Back pos 1) = back (confirmed by Chris 2026-10-30). A till no station uses can be
+  Upfront) = front, and `back-register` (Back pos 1) = back (confirmed by Chris 2026-10-30).
+  Both are payment registers (migration 0061 dropped the one-payment-register limit, 2026-11-03): Upfront gets the
+  Dejavoo Z6, Back pos 1 keys cards in; each takes cash into its own till. An order-taking tablet's checks go to its
+  **Sends checks to** register (`ordering_payment_stations.payment_station_key`; default: the only payment register,
+  else all of them), recorded on `ordering_payment_station_queue.target_station_key`. A till no station uses can be
   retired in Settings → Tills (inactive, history kept; an empty open session is closed). Only a manager can open, count or close out a till; cash sales, refunds, paid in/out and drops move the
   session's expected cash.
 - Driver cash-out (`/pos/deli/drivers`, `src/lib/ordering-driver-cash.ts`, since 2026-11-09): lists every unpaid

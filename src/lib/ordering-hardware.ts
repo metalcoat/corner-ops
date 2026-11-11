@@ -477,6 +477,18 @@ export async function saveHardware(input: {
       throw new Error("Unknown station mode.");
     if (stationMode === "payment" && !receiptPrinterId)
       throw new Error("The payment station requires a receipt printer / till.");
+    // An order-taking register may name the payment register its checks go to; '' = the only one, or any.
+    const paymentStationKey =
+      stationMode === "order_taker"
+        ? String(body.paymentStationKey || "").trim().toLowerCase()
+        : "";
+    if (
+      paymentStationKey &&
+      !(
+        await sql`SELECT 1 FROM ordering_payment_stations WHERE business=${input.business} AND station_key=${paymentStationKey} AND station_key<>${stationKey} AND station_mode='payment' AND active=TRUE`
+      ).length
+    )
+      throw new Error("Choose a payment register for this register's checks.");
     const deviceIds = [
       receiptPrinterId,
       paymentTerminalId,
@@ -526,7 +538,7 @@ export async function saveHardware(input: {
         throw new Error("Choose a scanner / magnetic-stripe reader.");
     }
     const saved = (
-      await sql`INSERT INTO ordering_payment_stations(id,business,name,station_key,station_mode,receipt_printer_id,payment_terminal_id,gift_card_reader_id,phone_card_payments_enabled,customer_display_enabled,shared_register_key,active,created_by,updated_by) VALUES(${id},${input.business},${name},${stationKey},${stationMode},${receiptPrinterId},${paymentTerminalId},${giftCardReaderId},${phoneCardPaymentsEnabled},${customerDisplayEnabled},${sharedRegisterKey},TRUE,${input.actor.id},${input.actor.id}) ON CONFLICT(business,station_key) DO UPDATE SET name=EXCLUDED.name,station_mode=EXCLUDED.station_mode,receipt_printer_id=EXCLUDED.receipt_printer_id,payment_terminal_id=EXCLUDED.payment_terminal_id,gift_card_reader_id=EXCLUDED.gift_card_reader_id,phone_card_payments_enabled=EXCLUDED.phone_card_payments_enabled,customer_display_enabled=EXCLUDED.customer_display_enabled,shared_register_key=EXCLUDED.shared_register_key,active=TRUE,updated_by=EXCLUDED.updated_by,updated_at=NOW() RETURNING id`
+      await sql`INSERT INTO ordering_payment_stations(id,business,name,station_key,station_mode,receipt_printer_id,payment_terminal_id,gift_card_reader_id,phone_card_payments_enabled,customer_display_enabled,shared_register_key,payment_station_key,active,created_by,updated_by) VALUES(${id},${input.business},${name},${stationKey},${stationMode},${receiptPrinterId},${paymentTerminalId},${giftCardReaderId},${phoneCardPaymentsEnabled},${customerDisplayEnabled},${sharedRegisterKey},${paymentStationKey},TRUE,${input.actor.id},${input.actor.id}) ON CONFLICT(business,station_key) DO UPDATE SET name=EXCLUDED.name,station_mode=EXCLUDED.station_mode,payment_station_key=EXCLUDED.payment_station_key,receipt_printer_id=EXCLUDED.receipt_printer_id,payment_terminal_id=EXCLUDED.payment_terminal_id,gift_card_reader_id=EXCLUDED.gift_card_reader_id,phone_card_payments_enabled=EXCLUDED.phone_card_payments_enabled,customer_display_enabled=EXCLUDED.customer_display_enabled,shared_register_key=EXCLUDED.shared_register_key,active=TRUE,updated_by=EXCLUDED.updated_by,updated_at=NOW() RETURNING id`
     )[0];
     return { id: String(saved.id) };
   }

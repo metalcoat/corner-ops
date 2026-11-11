@@ -44,6 +44,7 @@ type Station = {
   receipt_printer_id?: string | null;
   payment_terminal_id?: string | null;
   gift_card_reader_id?: string | null;
+  payment_station_key?: string;
 };
 type TerminalReview = { id: string; order_id: string; display_number: string; amount_cents: number; provider_transaction_reference: string; status_message: string; created_at: string; review_kind?: "terminal" | "web" };
 type Dashboard = {
@@ -97,8 +98,8 @@ type PrinterForm = {
   categories: string[];
 };
 const blankPrinter = (kind: PrinterKind): PrinterForm => ({ id: "", key: "", kind, name: "", host: "", port: 9100, drawer: false, receipts: false, textSize: "normal", headerSize: "large", tillKey: "", language: "zpl", width: 101, height: 51, categories: [] });
-type StationForm = { id: string; key: string; name: string; payment: boolean; printerId: string; terminalId: string; readerId: string; display: boolean; phonePayments: boolean; registerKey: string; originalPrinterId: string };
-const blankStation = (): StationForm => ({ id: "", key: "", name: "", payment: false, printerId: "", terminalId: "", readerId: "", display: false, phonePayments: true, registerKey: "", originalPrinterId: "" });
+type StationForm = { id: string; key: string; name: string; payment: boolean; printerId: string; terminalId: string; readerId: string; display: boolean; phonePayments: boolean; registerKey: string; originalPrinterId: string; paymentStationKey: string };
+const blankStation = (): StationForm => ({ id: "", key: "", name: "", payment: false, printerId: "", terminalId: "", readerId: "", display: false, phonePayments: true, registerKey: "", originalPrinterId: "", paymentStationKey: "" });
 type OtherForm = { id: string; key: string; type: "payment_terminal" | "barcode_scanner"; name: string; mxTerminalId: string };
 
 function StatusPill({ status }: { status: string }) {
@@ -168,6 +169,7 @@ export default function HardwareSettingsClient() {
   const terminals = devices.filter((device) => device.role === "payment_terminal");
   const readers = devices.filter((device) => device.role === "barcode_scanner");
   const stations = data?.paymentStations ?? [];
+  const paymentRegisters = stations.filter((row) => row.station_mode === "payment");
   const categoryName = new Map((data?.categories ?? []).map((row) => [row.id, row.name]));
   const usedBy = (deviceId: string) => stations.filter((row) => row.receipt_printer_id === deviceId || row.payment_terminal_id === deviceId || row.gift_card_reader_id === deviceId).map((row) => row.name);
   const deviceName = (id?: string | null) => devices.find((device) => device.id === id)?.name;
@@ -231,6 +233,7 @@ export default function HardwareSettingsClient() {
         receiptPrinterId: form.printerId || null,
         paymentTerminalId: form.payment ? form.terminalId || null : null,
         giftCardReaderId: form.payment ? form.readerId || null : null,
+        paymentStationKey: form.payment ? "" : form.paymentStationKey,
         phoneCardPaymentsEnabled: form.phonePayments,
         customerDisplayEnabled: form.display,
         // Registers sharing a printer share its cash drawer; the server works the key out from the printer.
@@ -623,7 +626,7 @@ export default function HardwareSettingsClient() {
             </button>
           )}
         </div>
-        <p className="hwIntro">One per POS tablet. Each register says which printer gives its receipts (and cash drawer), and whether it takes payments.</p>
+        <p className="hwIntro">One per POS tablet. Each register says which printer gives its receipts (and cash drawer), and whether it takes payments. Any number of registers can take payments, each with its own cash drawer; the card terminal is optional (without one, cards are keyed in).</p>
         {station && (
           <form
             className="hwForm"
@@ -662,7 +665,7 @@ export default function HardwareSettingsClient() {
               <label className={station.payment ? "selected" : ""}>
                 <input type="radio" checked={station.payment} onChange={() => setStation({ ...station, payment: true })} />
                 <strong>Yes — payment register</strong>
-                <small>Has the card terminal and cash drawer. Only one register can be the payment register.</small>
+                <small>Takes cash into its own drawer, and cards on its card terminal (or keyed in if it has none).</small>
               </label>
             </fieldset>
             {station.payment && (
@@ -670,7 +673,7 @@ export default function HardwareSettingsClient() {
                 <label className="hwField">
                   Card terminal
                   <select value={station.terminalId} onChange={(e) => setStation({ ...station, terminalId: e.target.value })}>
-                    <option value="">None yet</option>
+                    <option value="">None (key in cards)</option>
                     {terminals.map((device) => (
                       <option key={device.id} value={device.id}>{device.name}</option>
                     ))}
@@ -683,6 +686,20 @@ export default function HardwareSettingsClient() {
                     {readers.map((device) => (
                       <option key={device.id} value={device.id}>{device.name}</option>
                     ))}
+                  </select>
+                </label>
+              </div>
+            )}
+            {!station.payment && (
+              <div className="hwFields">
+                <label className="hwField">
+                  Sends checks to
+                  <select value={station.paymentStationKey} onChange={(e) => setStation({ ...station, paymentStationKey: e.target.value })}>
+                    <option value="">{paymentRegisters.length === 1 ? paymentRegisters[0].name : "Any payment register"}</option>
+                    {paymentRegisters.length > 1 &&
+                      paymentRegisters.map((row) => (
+                        <option key={row.id} value={row.station_key}>{row.name}</option>
+                      ))}
                   </select>
                 </label>
               </div>
@@ -731,7 +748,13 @@ export default function HardwareSettingsClient() {
                   </li>
                   {row.station_mode === "payment" && (
                     <li>
-                      Card terminal: <b>{deviceName(row.payment_terminal_id) || "none yet"}</b>
+                      Card terminal: <b>{deviceName(row.payment_terminal_id) || "none (cards keyed in)"}</b>
+                    </li>
+                  )}
+                  {row.station_mode !== "payment" && paymentRegisters.length > 0 && (
+                    <li>
+                      Sends checks to:{" "}
+                      <b>{paymentRegisters.find((other) => other.station_key === row.payment_station_key)?.name || (paymentRegisters.length === 1 ? paymentRegisters[0].name : "any payment register")}</b>
                     </li>
                   )}
                   {row.gift_card_reader_id && (
@@ -759,6 +782,7 @@ export default function HardwareSettingsClient() {
                         phonePayments: row.phone_card_payments_enabled,
                         registerKey: row.shared_register_key || "",
                         originalPrinterId: row.receipt_printer_id || "",
+                        paymentStationKey: row.payment_station_key || "",
                       })
                     }
                   >

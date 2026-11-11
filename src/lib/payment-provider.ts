@@ -19,7 +19,6 @@ export function paymentProviderStatus(): PaymentProviderStatus {
     MX_MERCHANT_ID: process.env.MX_MERCHANT_ID,
     MX_CONSUMER_KEY: process.env.MX_CONSUMER_KEY,
     MX_CONSUMER_SECRET: process.env.MX_CONSUMER_SECRET,
-    MX_BUSINESS_ID: process.env.MX_BUSINESS_ID,
   };
   const missing = Object.entries(required)
     .filter(([, value]) => !value?.trim())

@@ -8,7 +8,8 @@ async function main() {
   process.env.MX_MERCHANT_ID = "test-merchant";
   process.env.MX_CONSUMER_KEY = "test-consumer-key";
   process.env.MX_CONSUMER_SECRET = "test-consumer-secret";
-  process.env.MX_BUSINESS_ID = "test-business";
+  // No MX call uses a business ID, so MX counts as set up without one.
+  delete process.env.MX_BUSINESS_ID;
   process.env.MX_TERMINAL_API_ENABLED = "false";
 
   const { paymentProviderStatus } = await import("../src/lib/payment-provider");

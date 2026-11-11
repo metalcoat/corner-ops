@@ -1,18 +1,18 @@
 # Corner Deli payment station
 
-The intended layout is one checkout device and any number of kitchen order-taking devices.
+Corner Deli has two payment registers, each with its own cash drawer: the front register (**Upfront**) with the Dejavoo card terminal, and the back register (**Back pos 1**), which keys cards in. Any other tablets take orders only.
 
-1. In **POS → Settings → Hardware**, add the receipt printer attached to the cash drawer.
+1. In **POS → Settings → Printers & devices**, add the receipt printer attached to each cash drawer.
 2. Add a keyboard-wedge magnetic-stripe reader as the gift-card reader. Existing gift cards work by Track 1, Track 2, or their printed number; no PIN is required.
-3. Add one active `payment` station and assign its receipt printer, gift-card reader, and (when Dharma enables it) payment terminal.
-4. Add each kitchen device as an `order_taker` station, then choose **USE ON THIS DEVICE** on the matching device.
-5. Kitchen devices send unpaid orders to **Payments**. Only the payment station can record card, gift-card, or till-cash tenders.
+3. Under **Registers**, set each register that takes money to **Yes — payment register** and give it its receipt printer (its till and cash drawer), gift-card swiper, and **Card terminal** (or *None (key in cards)*). Any number of registers can take payments.
+4. Add each other tablet as an order-taking register (**No — takes orders**). **Sends checks to** picks the payment register its checks go to; left on the default, they go to the only payment register, or to every payment register when there are several. Then choose **Use on this tablet** on the matching device.
+5. Order-taking tablets send unpaid checks to **Payments**. Only a payment register can record card-present, gift-card, or till-cash tenders, and its cash goes into its own till.
 
 The cash drawer plugs into the supported network receipt printer's drawer port. A till cash sale or the manager-only **TEST DRAWER** action sends the ESC/POS drawer pulse through that printer. Drawer sales and refunds are recorded in the register-session cash ledger.
 
 ## Dharma / MX Merchant
 
-All card payments (keyed, online, and the terminal) go through Dharma / MX Merchant; Helcim is no longer used. The server expects `MX_MERCHANT_ID`, `MX_CONSUMER_KEY`, `MX_CONSUMER_SECRET`, and `MX_BUSINESS_ID`, with `MX_ENVIRONMENT=production` for the live account (anything else uses the sandbox). Set `MX_TERMINAL_API_ENABLED=true` only after the selected tap/chip/swipe terminal has been certified for the account.
+All card payments (keyed, online, and the terminal) go through Dharma / MX Merchant; Helcim is no longer used. The server expects `MX_MERCHANT_ID`, `MX_CONSUMER_KEY`, and `MX_CONSUMER_SECRET` (no business ID: no MX call uses one), with `MX_ENVIRONMENT=production` for the live account (anything else uses the sandbox). Set `MX_TERMINAL_API_ENABLED=true` only after the selected tap/chip/swipe terminal has been certified for the account.
 
 ### Card terminal (Dejavoo through MX)
 
@@ -29,7 +29,7 @@ Setup when the terminal arrives:
 1. Dharma registers the Dejavoo in MX Merchant (Settings → Terminals, POS provider **Dejavoo**, using the SPIn RegisterID and AuthKey from the Dejavoo portal). Ask Dharma to **turn off the tip screen on the terminal**, because the POS asks for the tip after the card.
 2. Run `npm run mx:terminal-check` to list the terminals MX knows about, or press **TEST PROVIDER** in POS → Settings → Hardware. The terminal ID is the long GUID, not the short numeric ID.
 3. Run `npm run mx:terminal-check -- --sale <GUID>` against the sandbox. It runs the POS flow for $0.01: authorizes, waits for a test card, completes with a $0.01 tip, and voids it. Until a physical terminal is connected, MX answers "The terminal is not connected."
-4. In **Hardware**, add a payment terminal with connection **MX Merchant terminal (Dejavoo)** and that terminal ID, then assign it to the payment station.
+4. In **Printers & devices → Card terminals & swipers**, press **+ Add card terminal**, name it, pick it with **Find my terminals** (or paste the GUID into **MX terminal ID**), and save. Then edit the front payment register and choose it as its **Card terminal**.
 5. Set `MX_TERMINAL_API_ENABLED=true`. Until then, the payment station keys cards in as before.
 
 Things to know at the counter:

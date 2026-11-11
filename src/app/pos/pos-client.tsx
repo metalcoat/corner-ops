@@ -5859,7 +5859,7 @@ export default function PosClient({
                   <section className="posOrderTakerPaymentNotice">
                     <strong>ORDER-TAKING STATION</strong>
                     <span>
-                      {stationProfile.phone_card_payments_enabled ? "Phone card payments can be taken here. Cash and in-person payments go to the front register." : "Payments are handled at the designated front register."}
+                      {stationProfile.phone_card_payments_enabled ? "Phone card payments can be taken here. Cash and in-person payments go to a payment register." : "Payments are taken at a payment register."}
                     </span>
                     <button
                       type="button"

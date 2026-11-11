@@ -156,7 +156,7 @@ export async function startMxStandIn(port = 0) {
     state,
     /** Server environment that points the MX clients at this stand-in. */
     env: {
-      MX_ENVIRONMENT: "sandbox", MX_MERCHANT_ID: M, MX_CONSUMER_KEY: "stand-in-key", MX_CONSUMER_SECRET: "stand-in-secret", MX_BUSINESS_ID: "stand-in",
+      MX_ENVIRONMENT: "sandbox", MX_MERCHANT_ID: M, MX_CONSUMER_KEY: "stand-in-key", MX_CONSUMER_SECRET: "stand-in-secret",
       MX_TERMINAL_API_ENABLED: "true", MX_TEST_API_BASE_URL: `${base}/checkout/v3`, MX_TEST_TERMINAL_API_BASE_URL: base,
     },
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),

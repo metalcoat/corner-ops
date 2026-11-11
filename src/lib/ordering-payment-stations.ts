@@ -17,9 +17,23 @@ export async function paymentStationProfile(business: OrderingBusiness, stationK
   return { ...profile, mx_terminal_ready: profile.station_mode === "payment" && profile.terminal_adapter_key === "mx-terminal" && Boolean(normalizeMxTerminalId(profile.terminal_mx_id)) && mxTerminalEnabled() } as typeof profile & { mx_terminal_ready: boolean };
 }
 
-export async function listPaymentQueue(business: OrderingBusiness) {
+// A payment register sees the checks sent to it, plus the ones sent to no register in particular or to a register
+// that no longer takes payments; any other device sees the whole queue.
+export async function listPaymentQueue(business: OrderingBusiness, stationKey = "") {
   await ensureOrderingHardwareSchema();
-  return getSql()`SELECT queue.*,orders.display_number,orders.first_name_snapshot,orders.last_name_snapshot,orders.service_type,orders.total_cents,orders.paid_cents,orders.amount_due_cents,orders.payment_status FROM ordering_payment_station_queue queue JOIN ordering_orders orders ON orders.id=queue.order_id WHERE queue.business=${business} AND queue.status IN ('queued','claimed') ORDER BY CASE queue.status WHEN 'claimed' THEN 0 ELSE 1 END,queue.queued_at`;
+  const key = stationKey.trim().toLowerCase();
+  return getSql()`SELECT queue.*,target.name target_station_name,orders.display_number,orders.first_name_snapshot,orders.last_name_snapshot,orders.service_type,orders.total_cents,orders.paid_cents,orders.amount_due_cents,orders.payment_status FROM ordering_payment_station_queue queue JOIN ordering_orders orders ON orders.id=queue.order_id LEFT JOIN ordering_payment_stations target ON target.business=queue.business AND target.station_key=queue.target_station_key WHERE queue.business=${business} AND queue.status IN ('queued','claimed') AND (${key}='' OR queue.target_station_key IN ('',${key}) OR target.station_mode IS DISTINCT FROM 'payment' OR target.active IS NOT TRUE OR NOT EXISTS (SELECT 1 FROM ordering_payment_stations me WHERE me.business=${business} AND me.station_key=${key} AND me.station_mode='payment' AND me.active=TRUE)) ORDER BY CASE queue.status WHEN 'claimed' THEN 0 ELSE 1 END,queue.queued_at`;
+}
+
+/** Where an order-taking register's checks go: its chosen payment register, else the only one, else '' (any). */
+export async function targetPaymentStationKey(business: OrderingBusiness, sourceStationKey: string) {
+  const sql = getSql(), key = sourceStationKey.trim().toLowerCase();
+  const payments = (await sql`SELECT station_key FROM ordering_payment_stations WHERE business=${business} AND station_mode='payment' AND active=TRUE ORDER BY name`).map((row) => String(row.station_key));
+  const source = key ? (await sql`SELECT station_mode,payment_station_key FROM ordering_payment_stations WHERE business=${business} AND station_key=${key} AND active=TRUE`)[0] : null;
+  if (source?.station_mode === "payment") return key;
+  const chosen = String(source?.payment_station_key || "");
+  if (chosen && payments.includes(chosen)) return chosen;
+  return payments.length === 1 ? payments[0] : "";
 }
 
 export async function queueForPayment(input:{business:OrderingBusiness;orderId:string;checkId?:string|null;sourceStationKey?:string;note?:string;actor:OrderingActor}) {
@@ -30,8 +44,8 @@ export async function queueForPayment(input:{business:OrderingBusiness;orderId:s
   if(input.checkId&&!((await sql`SELECT id FROM ordering_checks WHERE id=${input.checkId} AND order_id=${input.orderId}`)[0]))throw new PaymentStationError("Check was not found.");
   const existing=(await sql`SELECT * FROM ordering_payment_station_queue WHERE business=${input.business} AND order_id=${input.orderId} AND COALESCE(check_id,'00000000-0000-0000-0000-000000000000'::uuid)=COALESCE(${input.checkId||null}::uuid,'00000000-0000-0000-0000-000000000000'::uuid) AND status IN ('queued','claimed')`)[0];
   if(existing)return {...existing,duplicate:true};
-  const id=randomUUID();
-  return {...(await sql`INSERT INTO ordering_payment_station_queue(id,business,order_id,check_id,source_station_key,requested_by,request_note) VALUES(${id},${input.business},${input.orderId},${input.checkId||null},${String(input.sourceStationKey||'').trim().toLowerCase()},${input.actor.id},${String(input.note||'').trim().slice(0,300)}) RETURNING *`)[0],duplicate:false};
+  const id=randomUUID(),source=String(input.sourceStationKey||'').trim().toLowerCase(),target=await targetPaymentStationKey(input.business,source);
+  return {...(await sql`INSERT INTO ordering_payment_station_queue(id,business,order_id,check_id,source_station_key,target_station_key,requested_by,request_note) VALUES(${id},${input.business},${input.orderId},${input.checkId||null},${source},${target},${input.actor.id},${String(input.note||'').trim().slice(0,300)}) RETURNING *`)[0],duplicate:false};
 }
 
 export async function updatePaymentQueue(input:{business:OrderingBusiness;id:string;action:'claim'|'cancel'|'complete';actor:OrderingActor}) {
