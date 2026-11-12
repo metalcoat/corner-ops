@@ -27,6 +27,7 @@ import "./pos.css";
 import { usePosIdleLock } from "./use-pos-idle-lock";
 import PizzaToppingSelector from "@/components/pizza-topping-selector";
 import { DELIVERY_LOCATION_PRESETS, deliveryPresetSuggestions } from "@/lib/ordering-delivery-presets";
+import { deliveryFeeWaiverFor } from "@/lib/ordering-delivery-core";
 import {
   formatModifierIntensity,
   supportsSubModifierIntensity,
@@ -1689,6 +1690,7 @@ export default function PosClient({
               business,
               distanceMiles: deliveryRoute.distanceMiles,
               merchandiseSubtotalCents: subtotalCents,
+              address: validatedAddress,
             }),
           })
             .then(async (response) => {
@@ -1724,7 +1726,12 @@ export default function PosClient({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [business, deliveryRoute, serviceType, subtotalCents, cart.length]);
+  }, [business, deliveryRoute, serviceType, subtotalCents, cart.length, validatedAddress]);
+  // The server charges no fee to these addresses; this only labels the fee line.
+  const deliveryFeeWaiver = useMemo(
+    () => deliveryFeeWaiverFor(validatedAddress ?? { formattedAddress: deliveryAddress }),
+    [validatedAddress, deliveryAddress],
+  );
   useEffect(() => {
     if (!cart.length) {
       setQuotedPromotions([]);
@@ -4958,7 +4965,7 @@ export default function PosClient({
               serviceType === "delivery" && (
                 <div>
                   <span>
-                    Delivery fee
+                    {deliveryFeeWaiver ? deliveryFeeWaiver.label : "Delivery fee"}
                     {deliveryRoute
                       ? ` · ${deliveryRoute.distanceMiles.toFixed(1)} mi`
                       : ""}

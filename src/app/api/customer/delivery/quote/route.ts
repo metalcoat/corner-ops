@@ -1,5 +1,6 @@
 import { isoJson } from "@/lib/timestamp-values";
 import { quoteDelivery } from "@/lib/ordering-delivery";
+import type { DeliveryFeeAddress } from "@/lib/ordering-delivery-core";
 
 export const runtime = "nodejs";
 
@@ -15,6 +16,7 @@ export async function POST(request: Request) {
       distanceMiles,
       merchandiseSubtotalCents,
       customerDeclinedUpsell: Boolean(body.customerDeclinedUpsell),
+      address: body.address && typeof body.address === "object" ? body.address as DeliveryFeeAddress : null,
       managerBypassApproved: false,
     });
     return isoJson({ quote });

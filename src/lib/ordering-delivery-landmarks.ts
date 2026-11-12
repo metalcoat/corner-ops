@@ -102,6 +102,7 @@ export async function attachSpokenDeliveryAddress(
     business: "Corner Deli",
     distanceMiles: route.distanceMiles,
     merchandiseSubtotalCents: merchandiseAfterDiscounts(order),
+    address,
   });
   await saveOrderDeliveryAddress({
     orderId,

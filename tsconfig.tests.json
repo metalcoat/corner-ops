@@ -56,6 +56,7 @@
     "src/lib/ordering-modifier-pricing.ts",
     "src/lib/ordering-house-account-rules.ts",
     "src/lib/delivery-street-router.ts",
+    "src/lib/ordering-delivery-core.ts",
     "src/lib/complex-buildings.ts",
     "src/lib/ordering-employee-drink-rules.ts",
     "src/lib/shift-coverage-rules.ts",

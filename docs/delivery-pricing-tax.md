@@ -32,6 +32,8 @@ Examples:
 
 The owner can edit the merchandise minimum, maximum distance, every mileage boundary, and every fee without a code change.
 
+Fee-free addresses: deliveries to the Ogdensburg Bowl (1121 Paterson St, Ogdensburg NY 13669) have **no delivery fee**, whoever orders and on every channel. The address decides it (street number + street name, any case, punctuation or Street/St), not the customer. The $16.00 merchandise minimum still applies. The list is `FEE_FREE_DELIVERY_ADDRESSES` in `src/lib/ordering-delivery-core.ts` (a code change, not a setting).
+
 The stated outer range was "10 to 12 miles is $10." The development seed currently uses a contiguous >8-12 mile $10 tier so there is no accidental unpriced 8-10 mile hole. This is a working development interpretation and remains editable before production.
 
 ## Under-minimum delivery flow

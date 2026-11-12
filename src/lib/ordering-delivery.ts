@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { ensureOrderingDeliverySchema } from "@/lib/ordering-delivery-schema";
-import { evaluateDeliveryMinimum, resolveDeliveryFeeCents, type DeliveryFeeBand } from "@/lib/ordering-delivery-core";
+import { deliveryFeeWaiverFor, evaluateDeliveryMinimum, resolveDeliveryFeeCents, type DeliveryFeeAddress, type DeliveryFeeBand } from "@/lib/ordering-delivery-core";
 
 export type DeliveryPricingSettings = {
   business: OrderingBusiness;
@@ -215,6 +215,8 @@ export async function quoteDelivery(input: {
   merchandiseSubtotalCents: number;
   customerDeclinedUpsell?: boolean;
   managerBypassApproved?: boolean;
+  /** The delivery address, so a fee-free address (FEE_FREE_DELIVERY_ADDRESSES) gets no fee. */
+  address?: DeliveryFeeAddress | null;
 }) {
   const settings = await getDeliveryPricingSettings(input.business);
   if (!settings.enabled) throw new Error("Delivery is not enabled for this business.");
@@ -222,8 +224,10 @@ export async function quoteDelivery(input: {
     throw new Error(`Delivery address is outside the configured ${settings.maxDistanceMiles}-mile delivery area.`);
   }
 
-  const deliveryFeeCents = resolveDeliveryFeeCents(input.distanceMiles, settings.feeBands);
-  if (deliveryFeeCents == null) throw new Error("No delivery fee is configured for this distance.");
+  const standardDeliveryFeeCents = resolveDeliveryFeeCents(input.distanceMiles, settings.feeBands);
+  if (standardDeliveryFeeCents == null) throw new Error("No delivery fee is configured for this distance.");
+  const deliveryFeeWaiver = deliveryFeeWaiverFor(input.address);
+  const deliveryFeeCents = deliveryFeeWaiver ? 0 : standardDeliveryFeeCents;
 
   const minimum = evaluateDeliveryMinimum({
     merchandiseSubtotalCents: input.merchandiseSubtotalCents,
@@ -238,7 +242,7 @@ export async function quoteDelivery(input: {
     throw new Error("Delivery minimum bypasses are disabled for this business.");
   }
 
-  return { settings, deliveryFeeCents, minimum };
+  return { settings, deliveryFeeCents, standardDeliveryFeeCents, deliveryFeeWaiver, minimum };
 }
 
 export async function recordDeliveryMinimumResolution(input: {

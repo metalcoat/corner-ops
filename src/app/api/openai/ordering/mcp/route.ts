@@ -282,6 +282,7 @@ const schemas: Record<AiOrderingToolName, Record<string, unknown>> = {
       ...properties,
       distanceMiles: { type: "number" },
       merchandiseSubtotalCents: { type: "integer" },
+      address: { type: "string", description: "Delivery street address, so a fee-free address quotes no fee." },
     },
     required: ["callId", "distanceMiles", "merchandiseSubtotalCents"],
     additionalProperties: false,

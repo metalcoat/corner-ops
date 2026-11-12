@@ -96,7 +96,7 @@ export async function changeOrderFulfillment(orderId: string, business: Ordering
   let deliveryFeeCents = 0, resolved: ResolvedAddress | null = null, route = null, deliveryAddress = "";
   if (change.serviceType === "delivery") {
     // An address already on the order was validated and routed then; switching back to it needs no new lookup.
-    const onOrder = change.deliveryValidationToken ? undefined : (await sql`SELECT formatted_address,route_distance_miles FROM ordering_order_delivery_addresses WHERE order_id=${orderId} AND validation_status='validated' AND route_distance_miles IS NOT NULL`)[0];
+    const onOrder = change.deliveryValidationToken ? undefined : (await sql`SELECT formatted_address,line1,postal_code,route_distance_miles FROM ordering_order_delivery_addresses WHERE order_id=${orderId} AND validation_status='validated' AND route_distance_miles IS NOT NULL`)[0];
     if (!onOrder) {
       resolved = await deliveryAddressForChange(current, change);
       route = await routeDeliveryAddress(resolved.address).catch(() => null);
@@ -104,7 +104,7 @@ export async function changeOrderFulfillment(orderId: string, business: Ordering
     }
     deliveryAddress = onOrder ? String(onOrder.formatted_address) : String(resolved?.address.formattedAddress);
     try {
-      deliveryFeeCents = (await quoteDelivery({ business, distanceMiles: onOrder ? Number(onOrder.route_distance_miles) : Number(route?.distanceMiles), merchandiseSubtotalCents: merchandiseAfterDiscounts(current) })).deliveryFeeCents;
+      deliveryFeeCents = (await quoteDelivery({ business, distanceMiles: onOrder ? Number(onOrder.route_distance_miles) : Number(route?.distanceMiles), merchandiseSubtotalCents: merchandiseAfterDiscounts(current), address: onOrder ? { line1: String(onOrder.line1 || ""), postalCode: String(onOrder.postal_code || ""), formattedAddress: String(onOrder.formatted_address || "") } : resolved?.address })).deliveryFeeCents;
     } catch (error) {
       throw new OrderConflictError(error instanceof Error ? error.message : "Could not calculate the delivery fee.");
     }

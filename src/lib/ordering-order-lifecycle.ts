@@ -599,10 +599,10 @@ export async function syncDraftTotals(orderId: string, business: OrderingBusines
     if (order?.status !== "draft") return;
     await applyPromotionsToOrder(orderId);
     if (order.service_type !== "delivery" && order.service_type !== "no_contact_delivery") return;
-    const address = (await sql`SELECT validation_status,route_distance_miles FROM ordering_order_delivery_addresses WHERE order_id=${orderId}`)[0];
+    const address = (await sql`SELECT validation_status,route_distance_miles,line1,postal_code,formatted_address FROM ordering_order_delivery_addresses WHERE order_id=${orderId}`)[0];
     if (address?.validation_status !== "validated" || address.route_distance_miles == null) return;
     const priced = (await sql`SELECT subtotal_cents,discount_cents,delivery_fee_cents FROM ordering_orders WHERE id=${orderId}`)[0];
-    const quote = await quoteDelivery({ business, distanceMiles: Number(address.route_distance_miles), merchandiseSubtotalCents: merchandiseAfterDiscounts(priced) });
+    const quote = await quoteDelivery({ business, distanceMiles: Number(address.route_distance_miles), merchandiseSubtotalCents: merchandiseAfterDiscounts(priced), address: { line1: String(address.line1 || ""), postalCode: String(address.postal_code || ""), formattedAddress: String(address.formatted_address || "") } });
     if (quote.deliveryFeeCents !== number(priced.delivery_fee_cents)) await setOrderDeliveryFee(orderId, quote.deliveryFeeCents);
   });
 }
@@ -741,6 +741,11 @@ async function runDraftSubmit(
         business,
         distanceMiles: Number(addresses[0].route_distance_miles),
         merchandiseSubtotalCents: merchandiseAfterDiscounts(order),
+        address: {
+          line1: String(addresses[0].line1 || ""),
+          postalCode: String(addresses[0].postal_code || ""),
+          formattedAddress: String(addresses[0].formatted_address || ""),
+        },
         managerBypassApproved: Boolean(
           override?.approved && canManagePos(actor),
         ),

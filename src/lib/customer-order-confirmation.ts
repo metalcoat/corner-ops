@@ -4,6 +4,7 @@ import { sendTransactionalEmail } from "@/lib/transactional-email";
 import { orderReceiptBreakdown } from "@/lib/ordering-sales-tax";
 import { receiptBreakdownRows } from "@/lib/receipt-tax";
 import { waitingForOpening } from "@/lib/customer-order-progress";
+import { deliveryFeeWaiverFor } from "@/lib/ordering-delivery-core";
 
 const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
@@ -30,6 +31,10 @@ export async function customerOrderConfirmation(orderId: string): Promise<any> {
     FROM ordering_order_items WHERE order_id=${orderId} ORDER BY sort_order,created_at,id
   `) as Array<Record<string, any>>;
   const receipt = await orderReceiptBreakdown(orderId);
+  const address = (await sql`SELECT line1,postal_code,formatted_address FROM ordering_order_delivery_addresses WHERE order_id=${orderId}`)[0];
+  const feeWaiver = String(order.service_type).includes("delivery") && Number(order.delivery_fee_cents) === 0
+    ? deliveryFeeWaiverFor({ line1: address?.line1, postalCode: address?.postal_code, formattedAddress: address?.formatted_address })
+    : null;
   return {
     ...order,
     waiting_for_open: waitingForOpening({
@@ -38,6 +43,7 @@ export async function customerOrderConfirmation(orderId: string): Promise<any> {
     }),
     receipt,
     receipt_rows: receiptBreakdownRows(receipt),
+    delivery_fee_waiver_label: feeWaiver?.label || "",
     sales_tax_included_cents: receipt.taxCents,
     email_delivery_configured: Boolean(
       (process.env.RESEND_API_KEY?.trim() &&
@@ -90,6 +96,7 @@ export async function sendCustomerOrderConfirmation(orderId: string) {
       ...(Number(order.delivery_fee_cents) > 0 && !order.receipt.untaxedFeeCents
         ? [`Delivery fee: ${money(Number(order.delivery_fee_cents))}`]
         : []),
+      ...(order.delivery_fee_waiver_label ? [order.delivery_fee_waiver_label] : []),
       "",
       ...order.receipt_rows.map(([label, amount]: [string, string]) => `${label}: ${amount}`),
       order.payment_status === "paid"

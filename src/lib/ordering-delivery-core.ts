@@ -54,6 +54,57 @@ export function resolveDeliveryFeeCents(distanceMiles: number, bands: DeliveryFe
   return match?.feeCents ?? null;
 }
 
+export type DeliveryFeeAddress = {
+  line1?: string | null;
+  postalCode?: string | null;
+  formattedAddress?: string | null;
+};
+
+export type DeliveryFeeWaiver = { name: string; label: string };
+
+/**
+ * Places Corner Deli delivers to with no delivery fee, whoever orders and on
+ * every channel (POS, online, AI phone). Matched by street number and street
+ * name, so "1121 Paterson Street" and "1121 PATERSON ST." both match. The
+ * delivery minimum still applies; it is measured on food, not the fee.
+ */
+export const FEE_FREE_DELIVERY_ADDRESSES: ReadonlyArray<{ name: string; line1: string; postalCode: string }> = [
+  { name: "Ogdensburg Bowl", line1: "1121 Paterson St", postalCode: "13669" },
+];
+
+const STREET_WORDS: Record<string, string> = {
+  street: "st", str: "st", avenue: "ave", av: "ave", road: "rd", drive: "dr", boulevard: "blvd",
+  lane: "ln", place: "pl", court: "ct", terrace: "ter", highway: "hwy", parkway: "pkwy", circle: "cir",
+  north: "n", south: "s", east: "e", west: "w",
+};
+
+/** "1121 Paterson Street." → "1121 paterson st" */
+export function normalizeStreetLine(value: string | null | undefined): string {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[.,#'’]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => STREET_WORDS[word] || word)
+    .join(" ");
+}
+
+/** The fee-free place this delivery address is, or null. A ZIP that differs from the place's rules it out. */
+export function deliveryFeeWaiverFor(address: DeliveryFeeAddress | null | undefined): DeliveryFeeWaiver | null {
+  if (!address) return null;
+  const formatted = String(address.formattedAddress || "");
+  const line = normalizeStreetLine(address.line1 || formatted.split(",")[0]);
+  if (!line) return null;
+  // The ZIP is the last 5-digit group after the street ("…, Ogdensburg, NY 13669, USA").
+  const zip = String(address.postalCode || "").match(/\d{5}/)?.[0]
+    || (formatted.includes(",") ? formatted.slice(formatted.indexOf(",")).match(/\b\d{5}\b/g)?.at(-1) : "")
+    || "";
+  const place = FEE_FREE_DELIVERY_ADDRESSES.find((entry) =>
+    normalizeStreetLine(entry.line1) === line && (!zip || zip === entry.postalCode),
+  );
+  return place ? { name: place.name, label: `Delivery fee waived (${place.name})` } : null;
+}
+
 /**
  * Corner Deli's delivery minimum is a merchandise minimum. The configured
  * mileage-based delivery charge is added after the merchandise minimum is met

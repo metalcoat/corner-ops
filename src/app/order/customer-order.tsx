@@ -9,6 +9,7 @@ import {
   type PizzaToppingSelection,
 } from "@/lib/ordering-pizza-toppings";
 import { pointsRewardFitsCart } from "@/lib/ordering-points-rules";
+import { deliveryFeeWaiverFor } from "@/lib/ordering-delivery-core";
 import {
   formatModifierIntensity,
   supportsSubModifierIntensity,
@@ -524,6 +525,9 @@ export default function CustomerOrder() {
           (combo?.groups.reduce((total, group) => total + group.options.filter((option) => (line.comboSelections[group.id] || []).includes(option.id)).reduce((amount, option) => amount + option.priceDeltaCents, 0), 0) || 0))
     );
   }, 0);
+  // The server charges no fee to these addresses; this only labels the fee line.
+  const feeAddress = validatedDelivery?.formattedAddress || deliveryAddress;
+  const deliveryFeeWaiver = useMemo(() => deliveryFeeWaiverFor({ formattedAddress: feeAddress }), [feeAddress]);
   useEffect(() => {
     if (serviceType !== "delivery" || deliveryDistanceMiles == null) {
       setDeliveryQuoteCents(null);
@@ -536,6 +540,7 @@ export default function CustomerOrder() {
       body: JSON.stringify({
         distanceMiles: deliveryDistanceMiles,
         merchandiseSubtotalCents: estimated,
+        address: { formattedAddress: feeAddress },
       }),
       signal: controller.signal,
     })
@@ -552,7 +557,7 @@ export default function CustomerOrder() {
         setDeliveryQuoteCents(null);
       });
     return () => controller.abort();
-  }, [deliveryDistanceMiles, estimated, serviceType]);
+  }, [deliveryDistanceMiles, estimated, serviceType, feeAddress]);
   function add(line: Omit<CartLine, "key">) {
     setCart((rows) => {
       const next = { ...line, key: randomId() };
@@ -1180,7 +1185,7 @@ export default function CustomerOrder() {
             )}
             {serviceType === "delivery" && (
               <div>
-                <span>Delivery fee</span>
+                <span>{deliveryFeeWaiver ? deliveryFeeWaiver.label : "Delivery fee"}</span>
                 <strong>
                   {review && !review.delivery?.feePendingAddress
                     ? money(Number(review.deliveryFeeCents || 0))

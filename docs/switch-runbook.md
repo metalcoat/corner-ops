@@ -39,5 +39,10 @@ customers** today; all of that was built on dev. The switch must copy it once (s
    tunnel (:3001). Place one small real order (pickup, card), refund it, then update the Google Business Profile
    link and add the site to Search Console.
 
+**Carried in code, nothing to run:** the Ogdensburg Bowl (1121 Paterson St) has no delivery fee on any channel
+(`FEE_FREE_DELIVERY_ADDRESSES` in `src/lib/ordering-delivery-core.ts`, added 2026-11-12). No migration or setting;
+it ships with the image in step 2. At step 7, ring a POS delivery to "1121 Paterson Street" and check the fee line
+reads "Delivery fee waived (Ogdensburg Bowl)" and the delivery minimum still applies; then void it.
+
 **Rollback:** start the previous production image and restore the step-1 backup (`pg_restore` into
 `corner-ops-prod-postgres`); point Cloudflare back to Rezku for online ordering.

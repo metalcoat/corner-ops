@@ -266,6 +266,12 @@ export default function OrderConfirmation({ orderId }: { orderId: string }) {
               <strong>{money(Number(order.delivery_fee_cents))}</strong>
             </div>
           )}
+          {order.delivery_fee_waiver_label && (
+            <div>
+              <span>{order.delivery_fee_waiver_label}</span>
+              <strong>{money(0)}</strong>
+            </div>
+          )}
           {(order.receipt_rows || []).map(([label, amount]: [string, string]) => (
             <div key={label} className={label.startsWith("Total") ? "confirmationTotal" : "confirmationTax"}>
               <span>{label}</span>

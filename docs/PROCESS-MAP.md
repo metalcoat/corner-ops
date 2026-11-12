@@ -858,6 +858,13 @@ flowchart LR
 - A delivery route result is saved only after rechecking the current cart, draft status, delivery service and
   unpaid balance under the order lock. Address-book changes, the order address and its newly quoted fee commit
   together; a slow address lookup cannot overwrite an order that was paid or submitted while it ran.
+- Fee-free delivery addresses (2026-11-12): `FEE_FREE_DELIVERY_ADDRESSES` in `src/lib/ordering-delivery-core.ts`
+  (today only the Ogdensburg Bowl, 1121 Paterson St, 13669). `quoteDelivery()` gets the order's address on every
+  path (POS, website, AI phone tools and sideband, pickup/delivery switch, draft sync, Send) and charges no fee
+  when the street number + street match (case, punctuation, Street/St); a different ZIP rules it out. The delivery
+  minimum still applies. The fee line reads "Delivery fee waived (Ogdensburg Bowl)" on the POS, the website cart
+  and the confirmation page/email. Test: `tests/delivery-fee-waiver.test.ts`,
+  `scripts/voice-payment-recovery/fee-free-address.ts`, `test:delivery-pricing`.
 - Customer confirmation reads the kitchen prep hold and approved refund totals. Scheduled orders remain at
   **Order placed** until prep release. ASAP preorders still print immediately by store policy, but the customer
   sees **queued for opening** until the quoted opening (promised time minus quoted lead). This is separate from

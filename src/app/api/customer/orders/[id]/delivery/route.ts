@@ -85,6 +85,7 @@ export async function POST(
         business: "Corner Deli",
         distanceMiles: route.distanceMiles,
         merchandiseSubtotalCents: merchandiseAfterDiscounts(current),
+        address,
       });
       let customerAddressId = saved ? String(saved.id) : null;
       if (!saved && ownAccount) {

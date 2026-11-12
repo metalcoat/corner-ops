@@ -52,6 +52,25 @@ async function main() {
     sufficient.minimum.merchandiseSubtotalCents + sufficient.deliveryFeeCents,
     settings.minimumOrderCents + band.feeCents,
   );
+  // The Ogdensburg Bowl is delivered free; the minimum still applies.
+  const bowl = await quoteDelivery({
+    business: "Corner Deli",
+    distanceMiles: distance,
+    merchandiseSubtotalCents: shortSubtotal,
+    address: { line1: "1121 Paterson Street", postalCode: "13669" },
+  });
+  assert.equal(bowl.deliveryFeeCents, 0);
+  assert.equal(bowl.standardDeliveryFeeCents, band.feeCents);
+  assert.equal(bowl.deliveryFeeWaiver?.label, "Delivery fee waived (Ogdensburg Bowl)");
+  assert.equal(bowl.minimum.shortfallCents, short.minimum.shortfallCents);
+  const neighbor = await quoteDelivery({
+    business: "Corner Deli",
+    distanceMiles: distance,
+    merchandiseSubtotalCents: shortSubtotal,
+    address: { formattedAddress: "1120 Paterson St, Ogdensburg, NY 13669, USA" },
+  });
+  assert.equal(neighbor.deliveryFeeCents, band.feeCents);
+  assert.equal(neighbor.deliveryFeeWaiver, null);
   if (!process.env.SESSION_SECRET)
     throw new Error("SESSION_SECRET is required.");
   const encoded = Buffer.from(

@@ -168,7 +168,7 @@ export async function POST(request: Request) {
       try { route = await routeDeliveryAddress(validatedAddress); } catch { /* Routing remains optional until origin coordinates are configured. */ }
       await saveOrderDeliveryAddress({ orderId: String(order.id), address: validatedAddress, line2: String(body.deliveryUnit || ""), customerAddressId, route });
       if (route) {
-        const delivery = await quoteDelivery({ business, distanceMiles: route.distanceMiles, merchandiseSubtotalCents: merchandiseAfterDiscounts(order as { subtotal_cents?: unknown; discount_cents?: unknown }) });
+        const delivery = await quoteDelivery({ business, distanceMiles: route.distanceMiles, merchandiseSubtotalCents: merchandiseAfterDiscounts(order as { subtotal_cents?: unknown; discount_cents?: unknown }), address: validatedAddress });
         const rows = await getSql()`UPDATE ordering_orders SET delivery_fee_cents=${delivery.deliveryFeeCents},total_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${delivery.deliveryFeeCents}),amount_due_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${delivery.deliveryFeeCents}-paid_cents),updated_at=NOW() WHERE id=${order.id} RETURNING *`;
         order = rows[0] as typeof order;
       }

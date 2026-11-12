@@ -15,6 +15,7 @@ import {
   getDeliveryPricingSettings,
   quoteDelivery,
 } from "@/lib/ordering-delivery";
+import type { DeliveryFeeAddress } from "@/lib/ordering-delivery-core";
 import { findCustomers } from "@/lib/ordering-customers";
 import {
   redactCallerCustomer,
@@ -2676,6 +2677,7 @@ export async function deliveryQuote(
   business: OrderingBusiness,
   distanceMiles: number,
   subtotalCents: number,
+  address: DeliveryFeeAddress | null = null,
 ) {
   if (
     !Number.isFinite(distanceMiles) ||
@@ -2692,6 +2694,7 @@ export async function deliveryQuote(
     business,
     distanceMiles,
     merchandiseSubtotalCents: subtotalCents,
+    address,
   });
 }
 

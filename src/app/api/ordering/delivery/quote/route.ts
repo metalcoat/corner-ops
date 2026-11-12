@@ -2,6 +2,7 @@ import { isoJson } from "@/lib/timestamp-values";
 import { apiError, unauthorized } from "@/lib/http";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { quoteDelivery } from "@/lib/ordering-delivery";
+import type { DeliveryFeeAddress } from "@/lib/ordering-delivery-core";
 import { canManagePos, orderingActor } from "@/lib/ordering-route-auth";
 
 export const runtime = "nodejs";
@@ -28,6 +29,7 @@ export async function POST(request: Request) {
       distanceMiles: Number(body.distanceMiles),
       merchandiseSubtotalCents: Number(body.merchandiseSubtotalCents),
       customerDeclinedUpsell: Boolean(body.customerDeclinedUpsell),
+      address: body.address && typeof body.address === "object" ? body.address as DeliveryFeeAddress : null,
       managerBypassApproved,
     });
 

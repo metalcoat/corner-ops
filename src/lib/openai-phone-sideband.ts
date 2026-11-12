@@ -1002,7 +1002,7 @@ export function startOpenAiSideband(
         : [];
       const sql = getSql();
       const call = (
-        await sql`SELECT call.id,call.order_id,call.caller_phone,call.customer_id call_customer_id,call.pending_item,call.deferred_required_fields,orders.service_type,orders.customer_id,orders.first_name_snapshot,orders.last_name_snapshot,address.route_distance_miles FROM ordering_call_sessions call LEFT JOIN ordering_orders orders ON orders.id=call.order_id LEFT JOIN ordering_order_delivery_addresses address ON address.order_id=orders.id WHERE call.business='Corner Deli' AND call.three_cx_call_id=${callId} AND call.state IN('ai','handoff_pending') LIMIT 1`
+        await sql`SELECT call.id,call.order_id,call.caller_phone,call.customer_id call_customer_id,call.pending_item,call.deferred_required_fields,orders.service_type,orders.customer_id,orders.first_name_snapshot,orders.last_name_snapshot,address.route_distance_miles,address.line1 address_line1,address.postal_code address_postal_code FROM ordering_call_sessions call LEFT JOIN ordering_orders orders ON orders.id=call.order_id LEFT JOIN ordering_order_delivery_addresses address ON address.order_id=orders.id WHERE call.business='Corner Deli' AND call.three_cx_call_id=${callId} AND call.state IN('ai','handoff_pending') LIMIT 1`
       )[0];
       if (!call)
         throw new AiToolError(
@@ -1146,6 +1146,7 @@ export function startOpenAiSideband(
           business: "Corner Deli",
           distanceMiles: Number(call.route_distance_miles),
           merchandiseSubtotalCents: merchandiseAfterDiscounts(result as { subtotal_cents?: unknown; discount_cents?: unknown }),
+          address: { line1: call.address_line1 == null ? null : String(call.address_line1), postalCode: call.address_postal_code == null ? null : String(call.address_postal_code) },
         });
         await sql`UPDATE ordering_orders SET delivery_fee_cents=${quote.deliveryFeeCents},total_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${quote.deliveryFeeCents}),amount_due_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${quote.deliveryFeeCents}-paid_cents),version=version+1,updated_at=NOW() WHERE id=${String(result.id)}`;
         Object.assign(
