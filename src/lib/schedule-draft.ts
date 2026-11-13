@@ -2,6 +2,7 @@ import { getSql } from "@/lib/db";
 import { ensureScheduleMealSchema, normalizeScheduledMealFields } from "@/lib/schedule-meal-storage";
 import { normalizeScheduleTimeRange } from "@/lib/schedule-time-range";
 import { enforceScheduleTimeOff } from "@/lib/schedule-time-off";
+import { assertOnboardingAllowsScheduling } from "@/lib/employee-onboarding";
 import type { Business } from "@/lib/types";
 
 function clean(value: unknown, max = 500): string {
@@ -21,6 +22,7 @@ export async function createScheduleDraftWithMeals(input: {
   notes?: string;
   actor: string;
   acknowledgePendingTimeOff?: boolean;
+  acknowledgeApprovedTimeOff?: boolean;
 }) {
   await ensureScheduleMealSchema();
   const { start, end } = normalizeScheduleTimeRange(input.startsAt, input.endsAt);
@@ -43,6 +45,7 @@ export async function createScheduleDraftWithMeals(input: {
       LIMIT 1
     ` as unknown as Array<{ id: string }>;
     if (!employee[0]) throw new Error("Employee is not active for this location.");
+    await assertOnboardingAllowsScheduling(input.business, input.employeeId);
 
     const overlap = await sql`
       SELECT id FROM schedule_shifts
@@ -59,6 +62,7 @@ export async function createScheduleDraftWithMeals(input: {
       startsAt: start,
       endsAt: end,
       acknowledgePendingTimeOff: input.acknowledgePendingTimeOff,
+      acknowledgeApprovedTimeOff: input.acknowledgeApprovedTimeOff,
     });
   }
 

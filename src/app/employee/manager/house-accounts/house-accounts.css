@@ -1,0 +1,12 @@
+.haLinks{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.haToolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:14px 0}
+.haToolbar input[type=search]{flex:1 1 220px;min-height:42px;padding:8px 10px;border:1px solid var(--mgr-line);border-radius:8px;background:var(--mgr-panel);color:var(--mgr-text);font:inherit;font-size:1rem}
+.haCheck{display:flex;gap:6px;align-items:center;color:var(--mgr-muted)}
+.mgrPage .haOwes{color:#fcd34d}
+.haActions{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0}
+.haNotice{padding:10px;border:1px solid #22c55e;border-radius:8px;background:#052e16;color:#bbf7d0}
+.haAmount{display:grid;justify-items:end;gap:2px;flex:none}.haAmount small{color:var(--mgr-muted)}
+.haHint{color:var(--mgr-muted)}
+.osForm textarea{padding:8px 10px;border:1px solid var(--mgr-line);border-radius:8px;background:var(--mgr-bg);color:var(--mgr-text);font:inherit}
+.haWrap{flex-wrap:wrap;align-items:center}.haWrap select{min-height:42px;padding:8px;border:1px solid var(--mgr-line);border-radius:8px;background:var(--mgr-bg);color:var(--mgr-text);font:inherit}
+.mgrPage .haButton{display:inline-flex;align-items:center;min-height:42px;padding:8px 12px;border:1px solid var(--mgr-accent);border-radius:8px;background:var(--mgr-accent);color:#fff;text-decoration:none}

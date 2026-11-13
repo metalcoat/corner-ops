@@ -3,7 +3,7 @@ import { ensureThreeCxCdrSchema } from "@/lib/three-cx-cdr";
 
 const TIME_ZONE = "America/New_York";
 
-type StoredCdr = {
+export type StoredCdr = {
   id: string;
   recordKey: string;
   historyId: string;
@@ -76,7 +76,7 @@ function getOffsetMilliseconds(date: Date, timeZone: string): number {
   ) - date.getTime();
 }
 
-function localPartsToUtc(year: number, month: number, day: number, hour: number, minute: number, second: number): Date {
+export function localPartsToUtc(year: number, month: number, day: number, hour: number, minute: number, second: number): Date {
   let timestamp = Date.UTC(year, month - 1, day, hour, minute, second);
   for (let index = 0; index < 2; index += 1) {
     timestamp = Date.UTC(year, month - 1, day, hour, minute, second) - getOffsetMilliseconds(new Date(timestamp), TIME_ZONE);
@@ -90,14 +90,14 @@ function dateBoundary(value: string): Date {
   return localPartsToUtc(year, month, day, 0, 0, 0);
 }
 
-function normalizePhone(value: unknown): string {
+export function normalizePhone(value: unknown): string {
   let digits = clean(value, 100).replace(/\D/g, "");
   if (digits.length === 11 && digits.startsWith("1")) digits = digits.slice(1);
   if (digits.length > 10) digits = digits.slice(-10);
   return digits;
 }
 
-function phoneMatches(left: string, right: string): boolean {
+export function phoneMatches(left: string, right: string): boolean {
   const a = normalizePhone(left);
   const b = normalizePhone(right);
   if (!a || !b) return false;
@@ -110,7 +110,7 @@ function endpointMatches(value: string, endpoint: string): boolean {
   return value.split(/[^0-9]+/).filter(Boolean).some((token) => token === target);
 }
 
-function settings() {
+export function callReportSettings() {
   const queue = clean(process.env.THREE_CX_DELI_QUEUE || "90", 30);
   const extensions = clean(process.env.THREE_CX_DELI_EXTENSIONS || "", 2000)
     .split(/[\s,;|]+/)
@@ -124,7 +124,7 @@ function settings() {
   };
 }
 
-function mapStored(row: Record<string, unknown>): StoredCdr {
+export function mapStored(row: Record<string, unknown>): StoredCdr {
   const date = (value: unknown) => value ? new Date(String(value)) : null;
   return {
     id: String(row.id),
@@ -156,7 +156,7 @@ function mapStored(row: Record<string, unknown>): StoredCdr {
   };
 }
 
-function queueRecord(row: StoredCdr, queue: string): boolean {
+export function queueRecord(row: StoredCdr, queue: string): boolean {
   const values = [
     row.toNo,
     row.toDn,
@@ -170,15 +170,15 @@ function queueRecord(row: StoredCdr, queue: string): boolean {
   return endpointMatches(values, queue);
 }
 
-function groupKey(row: StoredCdr): string {
+export function groupKey(row: StoredCdr): string {
   return row.historyId || row.callId || row.recordKey;
 }
 
-function entityLooksHuman(row: StoredCdr): boolean {
+export function entityLooksHuman(row: StoredCdr): boolean {
   return /extension|user|agent/.test(`${row.toType} ${row.finalType}`.toLowerCase());
 }
 
-function callerNumber(rows: StoredCdr[]): string {
+export function callerNumber(rows: StoredCdr[]): string {
   const ordered = [...rows].sort((left, right) => (left.startedAt?.getTime() || 0) - (right.startedAt?.getTime() || 0));
   for (const row of ordered) {
     for (const candidate of [row.fromNo, row.fromDn, row.fromDisplayName]) {
@@ -189,7 +189,7 @@ function callerNumber(rows: StoredCdr[]): string {
   return clean(ordered[0]?.fromNo || ordered[0]?.fromDisplayName, 100);
 }
 
-function involvesExtension(row: StoredCdr, extension: string): boolean {
+export function involvesExtension(row: StoredCdr, extension: string): boolean {
   return endpointMatches([
     row.fromNo,
     row.toNo,
@@ -202,13 +202,13 @@ function involvesExtension(row: StoredCdr, extension: string): boolean {
   ].join(" "), extension);
 }
 
-function externalPhones(row: StoredCdr): string[] {
+export function externalPhones(row: StoredCdr): string[] {
   return [row.fromNo, row.toNo, row.dialNo, row.finalNumber]
     .map(normalizePhone)
     .filter((value) => value.length >= 7);
 }
 
-function elapsedSeconds(row: StoredCdr): number {
+export function elapsedSeconds(row: StoredCdr): number {
   if (row.durationSeconds > 0) return row.durationSeconds;
   if (row.startedAt && row.endedAt) return Math.max(0, (row.endedAt.getTime() - row.startedAt.getTime()) / 1000);
   return 0;
@@ -243,7 +243,7 @@ export async function threeCxDeliCallReport(startText: string, endText: string) 
   ` as unknown as Array<Record<string, unknown>>;
 
   const records = rows.map(mapStored);
-  const config = settings();
+  const config = callReportSettings();
   const grouped = new Map<string, StoredCdr[]>();
   for (const record of records) {
     const key = groupKey(record);

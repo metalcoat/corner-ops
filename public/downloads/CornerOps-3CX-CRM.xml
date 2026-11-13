@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Crm xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" Country="US" Name="CornerOps" Version="1" SupportsEmojis="false">
+  <Number Prefix="AsIs" MaxLength="10" />
+  <Connection MaxConcurrentRequests="4" />
+  <Parameters>
+    <Parameter Name="CornerOpsUrl" Type="String" Parent="General Configuration" Editor="String" Title="Corner Ops URL" Default="https://dev.ordercornerdeli.com" />
+    <Parameter Name="ApiSecret" Type="String" Parent="General Configuration" Editor="String" Title="Corner Ops CRM Secret" />
+  </Parameters>
+  <Authentication Type="No" />
+  <Scenarios>
+    <Scenario Id="" Type="REST">
+      <Request Url="[CornerOpsUrl]/api/3cx/crm/lookup?number=[Number]" MessagePasses="0" RequestEncoding="UrlEncoded" RequestType="Get" ResponseType="Json">
+        <Headers>
+          <Value Key="x-corner-ops-crm-secret" Passes="0" Type="String">[ApiSecret]</Value>
+        </Headers>
+      </Request>
+      <Rules>
+        <Rule Type="Any">contacts</Rule>
+      </Rules>
+      <Variables>
+        <Variable Name="ContactId" Path="contacts.id"><Filter /></Variable>
+        <Variable Name="FirstName" Path="contacts.firstName"><Filter /></Variable>
+        <Variable Name="LastName" Path="contacts.lastName"><Filter /></Variable>
+        <Variable Name="Email" Path="contacts.email"><Filter /></Variable>
+        <Variable Name="Phone" Path="contacts.phone"><Filter /></Variable>
+        <Variable Name="ContactUrl" Path="contacts.contactUrl"><Filter /></Variable>
+      </Variables>
+      <Outputs AllowEmpty="false">
+        <Output Type="FirstName" Passes="0" Value="[FirstName]" />
+        <Output Type="LastName" Passes="0" Value="[LastName]" />
+        <Output Type="Email" Passes="0" Value="[Email]" />
+        <Output Type="PhoneBusiness" Passes="0" Value="[Phone]" />
+        <Output Type="ContactUrl" Passes="0" Value="[ContactUrl]" />
+        <Output Type="EntityType" Passes="0" Value="Contacts" />
+        <Output Type="EntityId" Passes="0" Value="[ContactId]" />
+      </Outputs>
+    </Scenario>
+  </Scenarios>
+</Crm>

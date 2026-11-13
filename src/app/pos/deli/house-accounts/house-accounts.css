@@ -1,0 +1,24 @@
+.posTabs{display:grid;gap:14px;align-content:start;max-width:900px;margin:0 auto;padding:16px;color:#f8fafc}
+.posTabs h1{margin:0;font-size:1.5rem}.posTabs header p,.posTabsTotal p{margin:4px 0 0;color:#cbd5e1}
+.posTabs h2{margin:0 0 8px;color:#93c5fd;font-size:.85rem;letter-spacing:.08em;text-transform:uppercase}
+.posTabsSearch,.posTabs input[type=date],.posTabs select{min-height:52px;padding:8px 12px;border:1px solid #475569;border-radius:10px;background:#0f172a;color:#f8fafc;font:inherit;font-size:1.05rem}
+.posTabsList{display:grid;gap:8px}
+.posTabs button,.posTabs .actions a{min-height:56px;padding:8px 14px;border:1px solid #475569;border-radius:10px;background:#1e293b;color:#f8fafc;font:inherit;font-weight:900;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
+.posTabs button:disabled{opacity:.5}
+.posTabsList button{justify-content:space-between;text-align:left;font-weight:400}
+.posTabsList span{display:grid;gap:2px}.posTabsList small{color:#cbd5e1}.posTabsList b{font-size:1.2rem}
+.posTabs .owes{color:#fcd34d}.posTabs .paid{color:#86efac}
+.posTabsBack{justify-self:start}
+.posTabsTotal{display:flex;flex-wrap:wrap;justify-content:space-between;gap:16px;padding:18px;border:2px solid #a78bfa;border-radius:14px;background:#1e1b4b}
+.posTabsTotal .amount{display:grid;justify-items:end;gap:2px}.posTabsTotal .amount strong{font-size:2.6rem;line-height:1.1}.posTabsTotal small{color:#c4b5fd;font-weight:900}
+.posTabsStatement{display:grid;gap:10px;padding:14px;border:1px solid #334155;border-radius:12px;background:#111827}
+.posTabsStatement p{margin:0;color:#e2e8f0}
+.posTabsStatement .dates{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}.posTabsStatement label{display:grid;gap:4px;color:#cbd5e1;font-size:.8rem}
+.posTabsStatement .actions{display:flex;flex-wrap:wrap;gap:8px}
+.posTabs button.primary{background:#6d28d9;border-color:#c4b5fd}
+.posTabsActivity .row{display:flex;justify-content:space-between;gap:12px;padding:10px 2px;border-bottom:1px solid #1e293b}
+.posTabsActivity .row>div{display:grid;gap:2px;min-width:0}.posTabsActivity small{color:#cbd5e1;overflow-wrap:anywhere}
+.posTabsActivity .amount{justify-items:end;flex:none}
+.posTabsEmpty{margin:0;color:#cbd5e1}
+.posTabsError{margin:0;padding:10px;border:1px solid #ef4444;border-radius:8px;background:#451a1a;color:#fecaca}
+.posTabsNotice{margin:0;padding:10px;border:1px solid #22c55e;border-radius:8px;background:#052e16;color:#bbf7d0}

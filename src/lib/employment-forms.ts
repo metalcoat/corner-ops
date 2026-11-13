@@ -1,6 +1,7 @@
+import { nyFoodServiceRates, tippedOvertimeRateCents } from "@/lib/ny-tipped-wage";
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
-import { ensureSchema, getSql } from "@/lib/db";
 import { requireStrongSecret } from "@/lib/secret-strength";
+import { ensureSchema, getSql } from "@/lib/db";
 import type { Business } from "@/lib/types";
 
 export type EmploymentFormType = "W4" | "IT2104" | "I9" | "PAY_NOTICE" | "MEAL_POLICY";
@@ -98,7 +99,6 @@ export function ensureEmploymentFormsSchema(): Promise<void> {
   if (!employmentSchemaPromise) {
     employmentSchemaPromise = (async () => {
       await ensureSchema();
-      const sql = getSql();
     })().catch((error) => {
       employmentSchemaPromise = null;
       throw error;
@@ -108,7 +108,10 @@ export function ensureEmploymentFormsSchema(): Promise<void> {
 }
 
 function encryptionKey(): Buffer {
-  const secret = requireStrongSecret(process.env.EMPLOYMENT_FORMS_ENCRYPTION_KEY, "EMPLOYMENT_FORMS_ENCRYPTION_KEY");
+  const secret = requireStrongSecret(
+    process.env.EMPLOYMENT_FORMS_ENCRYPTION_KEY,
+    "EMPLOYMENT_FORMS_ENCRYPTION_KEY",
+  );
   return createHash("sha256").update(secret, "utf8").digest();
 }
 
@@ -118,6 +121,20 @@ function encryptPayload(payload: Record<string, unknown>): string {
   const encrypted = Buffer.concat([cipher.update(JSON.stringify(payload), "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   return `v1.${iv.toString("base64url")}.${tag.toString("base64url")}.${encrypted.toString("base64url")}`;
+}
+
+/** Encrypts an uploaded form file (I-9 document copies) with the same key as form payloads. */
+export function encryptFormFile(bytes: Buffer): { data: Buffer; iv: string; tag: string } {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", encryptionKey(), iv);
+  const data = Buffer.concat([cipher.update(bytes), cipher.final()]);
+  return { data, iv: iv.toString("base64url"), tag: cipher.getAuthTag().toString("base64url") };
+}
+
+export function decryptFormFile(data: Buffer, iv: string, tag: string): Buffer {
+  const decipher = createDecipheriv("aes-256-gcm", encryptionKey(), Buffer.from(iv, "base64url"));
+  decipher.setAuthTag(Buffer.from(tag, "base64url"));
+  return Buffer.concat([decipher.update(data), decipher.final()]);
 }
 
 function decryptPayload(value: string): Record<string, unknown> {
@@ -229,17 +246,27 @@ async function insertForm(input: {
     INSERT INTO employment_forms (
       id, business, employee_id, employee_name, form_type, title, template_version,
       source_url, status, effective_date, encrypted_payload, assigned_by,
-      employer_signature_name, employer_signed_at
+      employer_signature_name, employer_signed_at, overtime_by_role_agreement
     ) VALUES (
       ${id}, ${input.business}, ${input.employee.id}, ${input.employee.name}, ${input.type},
       ${template.title}, ${template.version}, ${template.sourceUrl}, 'Assigned',
       ${input.effectiveDate || null}, ${encryptPayload(input.payload)}, ${input.actor},
-      ${employerSigned}, ${employerSigned ? new Date().toISOString() : null}
+      ${employerSigned}, ${employerSigned ? new Date().toISOString() : null}, ${input.payload.overtimeByRoleAgreement ? true : false}
     )
     RETURNING *
   ` as unknown as FormRow[];
   await event(id, "assigned", input.actor, { templateVersion: template.version, effectiveDate: input.effectiveDate || null });
   return summary(rows[0]);
+}
+
+/** Agreed in advance on the two-rate pay notice (29 CFR 778.419); without it overtime uses the weighted average. */
+export const OVERTIME_BY_ROLE_AGREEMENT = "I agree that when I work more than 40 hours in a week, each overtime hour is paid at 1.5 times the rate for the job I am doing during that hour: in-store work at the in-store overtime rate, and driving at the driving (tipped) overtime rate shown on this notice.";
+
+/** Tip credit on the NY pay notice: minimum wage minus the driver (tipped) cash rate, never above the legal credit. */
+function nyTipCreditPerHour(tippedRate: number, onDate: string): number {
+  const rates = nyFoodServiceRates(Number(String(onDate).slice(0, 4)) || new Date().getFullYear());
+  const credit = rates.minimumCents - Math.round(tippedRate * 100);
+  return Math.max(0, Math.min(rates.tipCreditCents, credit)) / 100;
 }
 
 export async function assignOnboardingPacket(input: {
@@ -248,6 +275,8 @@ export async function assignOnboardingPacket(input: {
   hireDate: string;
   actor: string;
   employerSignature: string;
+  /** Add employee leaves the pay notice out until a pay rate is set. */
+  skipPayNotice?: boolean;
 }): Promise<EmploymentFormSummary[]> {
   await ensureEmploymentFormsSchema();
   const employee = await findEmployee(input.business, input.employeeId);
@@ -265,13 +294,13 @@ export async function assignOnboardingPacket(input: {
     hireDate: input.hireDate,
   };
   const mealPolicy = {
-    statement: "Employees who work a shift requiring a meal period will receive an uninterrupted unpaid meal period of at least 30 minutes, or longer when required by law. Meal periods are scheduled around operational needs and applicable New York law. Employees must be completely relieved of duty. Any interrupted meal period or work performed during a meal period must be reported immediately so all working time is recorded and paid. This acknowledgment does not waive any legal meal-period right.",
+    statement: "Employees who work a shift requiring a meal period will receive an uninterrupted unpaid meal period of at least 30 minutes, or longer when required by law. Meal breaks are unpaid, so the employee must clock out at the start of the meal break and clock back in at the end. Meal periods are scheduled around operational needs and applicable New York law. Other breaks are not usually part of a shift; employees should check with their manager first, and a short break of under 20 minutes that a manager approves stays on the clock and is paid. Employees must be completely relieved of duty during a meal break. Any interrupted meal period or work performed during a meal period must be reported immediately so all working time is recorded and paid. This acknowledgment does not waive any legal meal-period right.",
   };
   return Promise.all([
     insertForm({ business: input.business, employee, type: "W4", actor: input.actor, effectiveDate: input.hireDate, payload: { ...common } }),
     insertForm({ business: input.business, employee, type: "IT2104", actor: input.actor, effectiveDate: input.hireDate, payload: { ...common } }),
     insertForm({ business: input.business, employee, type: "I9", actor: input.actor, effectiveDate: input.hireDate, payload: { ...common } }),
-    insertForm({
+    ...(input.skipPayNotice ? [] : [insertForm({
       business: input.business,
       employee,
       type: "PAY_NOTICE",
@@ -285,9 +314,12 @@ export async function assignOnboardingPacket(input: {
         regularRate: hourlyRate,
         secondaryRate: multipleRates ? tippedRate : null,
         overtimeRate: hourlyRate * 1.5,
-        tipCreditOrAllowance: multipleRates ? Math.max(0, hourlyRate - tippedRate) : 0,
+        // Second overtime rate for driving (tipped) hours: 1.5 × minimum minus the tip credit.
+        tippedOvertimeRate: multipleRates ? tippedOvertimeRateCents(Math.round(tippedRate * 100), Number(String(input.hireDate).slice(0, 4)) || new Date().getFullYear()) / 100 : null,
+        overtimeByRoleAgreement: multipleRates ? OVERTIME_BY_ROLE_AGREEMENT : null,
+        tipCreditOrAllowance: multipleRates ? nyTipCreditPerHour(tippedRate, input.hireDate) : 0,
       },
-    }),
+    })]),
     insertForm({ business: input.business, employee, type: "MEAL_POLICY", actor: input.actor, effectiveDate: input.hireDate, employerSignature: input.employerSignature, payload: { ...common, ...mealPolicy } }),
   ]);
 }
@@ -300,6 +332,8 @@ export async function assignRateChange(input: {
   tippedRate: number;
   actor: string;
   employerSignature: string;
+  /** "new-hire" when this is the first pay notice (Add employee had no rate yet). */
+  noticeKind?: "new-hire" | "rate-change" | "overtime-agreement";
 }): Promise<EmploymentFormSummary> {
   await ensureEmploymentFormsSchema();
   const employee = await findEmployee(input.business, input.employeeId);
@@ -317,12 +351,14 @@ export async function assignRateChange(input: {
     payload: {
       employer: profile,
       employee: { id: employee.id, name: employee.name, position: employee.position },
-      noticeKind: "rate-change",
+      noticeKind: input.noticeKind || "rate-change",
       formVariant: multipleRates ? "LS55" : "LS54",
       regularRate: input.hourlyRate,
       secondaryRate: multipleRates ? input.tippedRate : null,
       overtimeRate: input.hourlyRate * 1.5,
-      tipCreditOrAllowance: multipleRates ? Math.max(0, input.hourlyRate - input.tippedRate) : 0,
+      tippedOvertimeRate: multipleRates ? tippedOvertimeRateCents(Math.round(input.tippedRate * 100), Number(String(input.effectiveDate).slice(0, 4)) || new Date().getFullYear()) / 100 : null,
+      overtimeByRoleAgreement: multipleRates ? OVERTIME_BY_ROLE_AGREEMENT : null,
+      tipCreditOrAllowance: multipleRates ? nyTipCreditPerHour(input.tippedRate, input.effectiveDate) : 0,
       effectiveDate: input.effectiveDate,
     },
   });
@@ -435,4 +471,39 @@ export async function completeEmployerI9(input: {
   ` as unknown as FormRow[];
   await event(row.id, "employer-completed-i9", input.actor, { ipAddress: input.ipAddress, userAgent: input.userAgent });
   return summary(updated[0]);
+}
+
+/**
+ * Every active employee with a driver (tipped) rate who hasn't signed the overtime-by-job agreement gets an
+ * updated NY pay notice (their current rates plus the agreement) to sign in the Employee Hub. Anyone with an
+ * unsigned one already waiting is skipped. Payroll uses the weighted average for them until they sign.
+ */
+export async function sendOvertimeAgreements(input: { business: Business; actor: string; employerSignature: string }) {
+  await ensureEmploymentFormsSchema();
+  const sql = getSql();
+  const rows = await sql`
+    SELECT e.id, e.name, e.hourly_rate, e.tipped_rate,
+      EXISTS (SELECT 1 FROM employment_forms f WHERE f.employee_id = e.id AND f.form_type = 'PAY_NOTICE' AND f.overtime_by_role_agreement AND f.status IN ('Employee Signed', 'Completed')) AS signed,
+      EXISTS (SELECT 1 FROM employment_forms f WHERE f.employee_id = e.id AND f.form_type = 'PAY_NOTICE' AND f.overtime_by_role_agreement AND f.status = 'Assigned') AS waiting
+    FROM employees e
+    WHERE e.business = ${input.business} AND e.active = TRUE AND e.tipped_rate > 0 AND e.hourly_rate > 0
+    ORDER BY e.name
+  ` as unknown as Array<{ id: string; name: string; hourly_rate: string | number; tipped_rate: string | number; signed: boolean; waiting: boolean }>;
+  const sent: string[] = [];
+  const skipped: string[] = [];
+  for (const row of rows) {
+    if (row.signed || row.waiting) { skipped.push(row.name); continue; }
+    await assignRateChange({
+      business: input.business,
+      employeeId: row.id,
+      effectiveDate: new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" }),
+      hourlyRate: Number(row.hourly_rate),
+      tippedRate: Number(row.tipped_rate),
+      actor: input.actor,
+      employerSignature: input.employerSignature,
+      noticeKind: "overtime-agreement",
+    });
+    sent.push(row.name);
+  }
+  return { sent, skipped };
 }

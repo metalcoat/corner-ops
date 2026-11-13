@@ -24,10 +24,25 @@ type AttendanceCase = {
   managerNote: string;
 };
 
+type ClockOutCase = {
+  id: string;
+  employeeName: string;
+  position: string;
+  clockIn: string | null;
+  scheduledEnd: string | null;
+  employeeLeftAt: string | null;
+  employeeNote: string;
+  status: string;
+  smsLabel: string;
+  resolvedClockOut: string | null;
+  resolvedBy: string;
+};
+
 type Payload = {
   business: Business;
-  counts: { awaitingCorrection: number; submitted: number; approved: number; unresolvedEmail: number };
+  counts: { awaitingCorrection: number; submitted: number; approved: number; unresolvedEmail: number; missedClockOuts?: number };
   cases: AttendanceCase[];
+  clockOutCases?: ClockOutCase[];
 };
 
 
@@ -96,6 +111,7 @@ export default function AttendancePage() {
     {notice && <div className="noticeBar">{notice}</div>}
     <div className="controlGrid">
       <section className="controlCard"><div className="attendanceStats"><article><span>Awaiting employee</span><strong>{data?.counts.awaitingCorrection || 0}</strong></article><article><span>Submitted</span><strong>{data?.counts.submitted || 0}</strong></article><article><span>Approved</span><strong>{data?.counts.approved || 0}</strong></article><article><span>Email issues</span><strong>{data?.counts.unresolvedEmail || 0}</strong></article></div></section>
+      {Boolean(data?.clockOutCases?.length) && <section className="controlCard"><p className="eyebrow">Missed clock-outs · {data?.counts.missedClockOuts || 0} open</p><div className="attendanceList">{(data?.clockOutCases || []).map((item) => <article className={`attendanceCase ${item.status === "Resolved" ? "approved" : item.status === "Submitted" ? "submitted" : "awaiting-correction"}`} key={item.id}><header><div><strong>{item.employeeName}</strong><span>{item.position} · {item.status === "Open" ? "Still clocked in" : item.status === "Submitted" ? "Employee entered a time" : "Settled"}</span></div><small>{item.smsLabel}</small></header><div className="attendanceTimes"><div><span>Clocked in</span><strong>{local(item.clockIn)}</strong><small>Scheduled end {local(item.scheduledEnd)}</small></div><div><span>{item.status === "Resolved" ? "Clock-out saved" : "Employee says they left"}</span><strong>{local(item.status === "Resolved" ? item.resolvedClockOut : item.employeeLeftAt)}</strong>{item.resolvedBy && <small>{item.resolvedBy}</small>}</div></div>{item.employeeNote && <blockquote>{item.employeeNote}</blockquote>}{item.status !== "Resolved" && <div className="attendanceActions"><a href={`/ops/payroll-control/clock-outs?case=${encodeURIComponent(item.id)}`}>Choose clock-out</a></div>}</article>)}</div></section>}
       <section className="controlCard"><div className="attendanceList">{(data?.cases || []).map((item) => <article className={`attendanceCase ${item.status.toLowerCase().replaceAll(" ", "-")}`} key={item.id}><header><div><strong>{item.employeeName}</strong><span>{item.position} · {item.status}</span></div><small>{item.submissionChannel || "Not submitted yet"}</small></header><div className="attendanceTimes"><div><span>Scheduled</span><strong>{local(item.scheduledStart)}</strong><small>to {local(item.scheduledEnd)}</small></div><div><span>Employee correction</span><strong>{local(item.correctionStart)}</strong><small>to {local(item.correctionEnd)}</small></div></div>{item.employeeNote && <blockquote>{item.employeeNote}</blockquote>}<div className="attendanceMeta"><span>{item.employeeEmail || "Email missing"}</span><span>{item.notifiedAt ? `Portal link emailed ${local(item.notifiedAt)}` : item.notificationError || "Email not sent"}</span></div>{item.status === "Submitted" && <div className="attendanceActions"><button disabled={busy} onClick={() => void review(item, true)}>Approve & create time</button><button className="danger" disabled={busy} onClick={() => void review(item, false)}>Reject</button></div>}</article>)}{!data?.cases.length && <p>No missed-shift cases for this business.</p>}</div></section>
     </div>
   </main>;

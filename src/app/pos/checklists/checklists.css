@@ -1,0 +1,100 @@
+html:has(.checklistScreen),body:has(.checklistScreen){background:#0d1310}
+.checklistScreen{--ck-bg:#0d1310;--ck-panel:#151e18;--ck-card:#1f2a22;--ck-line:#2c3a30;--ck-text:#f1f5ef;--ck-muted:#9db7a5;--ck-green:#2fa65a;--ck-done:#173d24;min-height:100dvh;display:grid;align-content:start;gap:14px;padding:16px 20px 120px;background:var(--ck-bg);color:var(--ck-text);font-family:system-ui,sans-serif;font-size:clamp(15px,1.1vw,22px)}
+.checklistScreen *{box-sizing:border-box}
+.checklistScreen h1,.checklistScreen h2,.checklistScreen p{margin:0}
+.checklistScreen button{font:inherit;color:inherit;cursor:pointer;touch-action:manipulation}
+.checklistScreen button:disabled{opacity:.55;cursor:default}
+.ckHeader{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px}
+.ckHeader p{font-size:.8em;font-weight:900;letter-spacing:.16em;color:#8fd0a2}
+.ckHeader h1{font-size:2.2em;line-height:1}
+.ckWorker{display:grid;grid-template-columns:auto auto;align-items:center;gap:2px 14px;padding:10px 14px;border-radius:14px;background:#1d3a26;border:2px solid var(--ck-green)}
+.ckWorker span{color:var(--ck-muted);font-size:.85em}.ckWorker strong{grid-column:1;font-size:1.4em}.ckWorker small{grid-column:1;color:var(--ck-muted);font-size:.8em}
+.ckWorker button{grid-column:2;grid-row:1/4;min-height:60px;padding:8px 16px;border:0;border-radius:12px;background:#2c3a30;font-weight:800}
+.ckWorker.idle{display:grid;grid-template-columns:1fr;background:var(--ck-panel);border-color:var(--ck-line)}.ckWorker.idle span{color:var(--ck-text);font-weight:750;font-size:1em}
+.ckTabs{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.ckTabs button{display:grid;gap:2px;min-height:76px;padding:10px 14px;border:2px solid var(--ck-line);border-radius:14px;background:var(--ck-panel);text-align:left}
+.ckTabs button strong{font-size:1.25em}.ckTabs button small{color:var(--ck-muted);font-weight:700}
+.checklistScreen .ckTabs button.active{border:3px solid #8fd0a2;background:#24553e;box-shadow:0 0 0 2px #8fd0a233}
+.ckTabs button.complete small{color:#86efac}
+.ckError{padding:12px 14px;border-radius:12px;background:#4a1f1a;color:#ffd6cf;font-weight:750}
+.ckEmpty,.ckHint{color:var(--ck-muted);font-size:1.05em}
+.ckList,.ckSalads{display:grid;gap:12px}
+.ckProgress{display:grid;gap:6px}.ckProgress strong{font-size:1.3em}
+.ckProgress span{display:block;height:14px;border-radius:999px;background:#26332a;overflow:hidden}.ckProgress i{display:block;height:100%;background:var(--ck-green);transition:width .3s}
+.ckItems{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,340px),1fr));gap:10px}
+.ckItem{display:flex;align-items:center;gap:16px;min-height:88px;padding:12px 16px;border:2px solid var(--ck-line);border-radius:16px;background:var(--ck-card);text-align:left}
+.ckItem:active{transform:scale(.985)}
+.ckBox{flex:none;display:grid;place-items:center;width:52px;height:52px;border:3px solid #6b7f71;border-radius:12px;font-size:2em;font-weight:900}
+.ckLabel{display:grid;gap:3px;min-width:0}.ckLabel strong{font-size:1.3em;line-height:1.2}.ckLabel small{color:#bbf7d0;font-weight:750;font-size:1em}
+.ckItem.done{background:var(--ck-done);border-color:#2f6b43}.ckItem.done .ckBox{background:var(--ck-green);border-color:var(--ck-green);color:#fff}.ckItem.done strong{color:#d7e6da}
+.ckAll{justify-self:start;min-height:64px;padding:10px 22px;border:2px solid #8fd0a2;border-radius:14px;background:transparent;font-weight:850;font-size:1.1em}
+.ckSaladGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,230px),1fr));gap:10px}
+.ckSalad{display:grid;gap:4px;padding:14px;border:2px solid #4a6b3f;border-radius:16px;background:#1f3324;align-content:start}
+.ckSalad.fryer{border-color:#7c5a1e;background:#2e2615}
+.ckSalad strong{font-size:1.45em}.ckSalad small{color:var(--ck-muted);font-weight:650}
+.ckLast{color:#e6efe8;font-weight:650}.ckLast b{color:#fcd34d}
+.checklistScreen .ckSalad button{margin-top:8px;min-height:64px;padding:8px 12px;border:0;border-radius:12px;background:var(--ck-green);color:#fff;font-weight:850;font-size:1.05em}
+.checklistScreen .ckSalad.fryer button{background:#b7791f}
+.checklistScreen .ckSalad button:active{transform:scale(.98)}
+.ckSalads h2{margin-top:8px;font-size:1.1em;color:#8fd0a2;letter-spacing:.06em;text-transform:uppercase}
+.ckBatches{display:grid;gap:6px;margin:0;padding:0;list-style:none}
+.ckBatches li{display:grid;grid-template-columns:minmax(0,12em) 1fr;gap:2px 14px;padding:10px 12px;border-radius:12px;background:var(--ck-panel)}
+.ckBatches small{grid-column:2;color:var(--ck-muted)}
+.ckModal{position:fixed;inset:0;z-index:20;display:grid;place-items:center;padding:16px;background:#000a}
+.ckModal section{display:grid;gap:12px;width:min(520px,100%);max-height:94dvh;overflow:auto;padding:22px;border-radius:20px;background:#1a241d;border:2px solid var(--ck-line)}
+.ckModal h2{font-size:1.5em}.ckModal p{color:var(--ck-muted)}.ckModal ul{margin:0;padding-left:1.2em;display:grid;gap:4px}
+.ckChoices{display:flex;flex-wrap:wrap;gap:10px}
+.ckChoices button,.ckCancel{flex:1 1 auto;min-height:60px;padding:8px 16px;border:2px solid #4b5f51;border-radius:12px;background:#26332a;font-weight:800}
+.ckChoices .ckYes{background:var(--ck-green);border-color:var(--ck-green)}
+.ckCancel{background:transparent}
+.ckPin{text-align:center}
+.ckDots{display:flex;justify-content:center;gap:18px;margin:6px 0}.ckDots i{width:22px;height:22px;border:3px solid #94a3b8;border-radius:50%}.ckDots i.on{background:#f8fafc}
+.ckPinError{min-height:1.4em;color:#fecaca!important;font-weight:800}
+.ckKeys{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.ckKeys button{min-height:74px;border:2px solid #4b5f51;border-radius:14px;background:#26332a;font-size:1.8em;font-weight:900}.ckKeys .ckCancel{font-size:1em}
+.ckSheet{position:fixed;left:50%;bottom:16px;z-index:15;width:min(640px,calc(100% - 32px));transform:translateX(-50%)}
+.ckSheet section{display:grid;gap:10px;padding:16px 18px;border-radius:18px;background:#1d3a26;border:2px solid var(--ck-green);box-shadow:0 16px 50px #000a}
+.ckSheet strong{font-size:1.35em}.ckSheet span{color:#bbf7d0}
+.ckSheet input{min-height:56px;padding:10px 12px;border-radius:12px;border:1px solid #3a4b3f;background:#0f1611;color:#fff;font:inherit}
+@media(max-width:640px){.checklistScreen{padding:12px 12px 120px}.ckBatches li{grid-template-columns:1fr}.ckBatches small{grid-column:1}}
+.ckItemWrap{display:grid;grid-template-columns:1fr auto;align-items:stretch;gap:0;border-radius:16px}
+.ckItemWrap .ckItem{min-width:0}
+.ckItemWrap:has(.ckHelp) .ckItem{border-top-right-radius:0;border-bottom-right-radius:0}
+.ckHelp{display:grid;align-content:stretch;gap:0;border:2px solid var(--ck-line);border-left:0;border-radius:0 16px 16px 0;overflow:hidden;background:var(--ck-panel)}
+.checklistScreen .ckHelp button{min-width:84px;min-height:42px;padding:6px 10px;border:0;background:transparent;color:#8fd0a2;font-weight:800;font-size:.9em}
+.checklistScreen .ckHelp button+button{border-top:1px solid var(--ck-line)}
+.ckItemWrap.done .ckHelp{border-color:#2f6b43}
+.ckHowTo{grid-column:1/-1;margin:6px 4px 2px!important;padding:12px 14px;border-radius:12px;background:#22332a;color:#e6efe8;font-size:1.05em;line-height:1.4}
+.ckCountHint{color:#fcd34d!important;font-weight:700}
+.ckCounts{display:grid;gap:12px}
+.ckCounts label{display:grid;gap:6px;font-weight:800;font-size:1.1em}
+.ckCounts input{min-height:72px;padding:8px 14px;border-radius:14px;border:2px solid #4b5f51;background:#0f1611;color:#fff;font:inherit;font-size:2em;font-weight:900;font-variant-numeric:tabular-nums}
+.ckVideo section{width:min(960px,100%);max-height:96dvh}
+.ckVideoTop{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.checklistScreen .ckClose{min-height:64px;padding:8px 22px;border:2px solid #fca5a5;border-radius:14px;background:#4a1f1a;font-weight:900;font-size:1.15em}
+.ckVideoFrame{position:relative;aspect-ratio:16/9;width:100%;border-radius:12px;overflow:hidden;background:#000}
+.ckVideoFrame iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.ckMain{display:grid;align-content:start;gap:14px;min-width:0}
+.ckCase{display:grid;gap:8px;padding:10px 12px;border:2px solid #4a6b3f;border-radius:16px;background:#14201a}
+.ckCase h2{display:none;margin:0;font-size:.95em;color:#8fd0a2;letter-spacing:.08em;text-transform:uppercase}
+.checklistScreen .ckCaseToggle{display:flex;justify-content:space-between;align-items:center;min-height:48px;padding:4px 2px;border:0;background:none;color:#8fd0a2;font-weight:850;letter-spacing:.06em;text-transform:uppercase;font-size:.95em}
+.ckCase.folded .ckCaseBody{display:none}
+@media(min-width:1100px){
+  .checklistScreen{grid-template-columns:minmax(0,1fr) minmax(300px,24vw);align-items:start;column-gap:18px}
+  .ckMain{grid-column:1;grid-row:1}
+  .ckCase{grid-column:2;grid-row:1;position:sticky;top:16px;max-height:calc(100dvh - 32px);overflow:auto}
+  .ckCase h2{display:block}.checklistScreen .ckCaseToggle{display:none}.ckCase.folded .ckCaseBody{display:block}
+}
+.ckCountGrid{width:100%;border-collapse:separate;border-spacing:8px 8px;margin:-8px}
+.ckCountGrid thead th{font-size:.9em;color:var(--ck-muted);text-align:left;padding-left:4px}
+.ckCountGrid tbody th{text-align:left;font-size:1.15em;padding-right:6px;white-space:nowrap}
+.ckCountGrid input{width:100%;min-height:64px;padding:6px 12px;border-radius:12px;border:2px solid #4b5f51;background:#0f1611;color:#fff;font:inherit;font-size:1.7em;font-weight:900;font-variant-numeric:tabular-nums}
+.ckCountGrid input::placeholder{color:#4b5f51}
+.checklistScreen .ckCounts input{background:#0f1611;border:2px solid #4b5f51;color:#fff;box-shadow:none;outline:none}
+.checklistScreen .ckCounts input:focus{border-color:#8fd0a2;box-shadow:0 0 0 3px #8fd0a244}
+.ckPrefill{padding:8px 12px;border-radius:10px;background:#1e3a5f55;color:#cfe0ff!important;font-weight:650}
+.ckCountGrid th.ckMake{color:#fcd34d}
+.ckCountGrid td.ckMake{min-width:7.5em;padding-left:6px;vertical-align:middle}
+.ckCountGrid td.ckMake b{display:block;font-size:2em;line-height:1;color:#fcd34d;font-variant-numeric:tabular-nums}
+.ckCountGrid td.ckMake small{color:var(--ck-muted)}.ckCountGrid td.ckMake span{color:#fcd34d;font-weight:800}
+.ckModal section:has(.ckCountGrid){width:min(680px,100%)}

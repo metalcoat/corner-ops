@@ -1,4 +1,5 @@
 import { clearEmployeeSession, createEmployeeSession, getEmployeeSession } from "@/lib/employee-auth";
+import { recordOnboardingAppSignIn } from "@/lib/employee-onboarding";
 import { apiError, RateLimitError } from "@/lib/http";
 import { assertRateLimit, authRatePolicies, clearRateLimit, recordRateLimitFailure, type RateLimitPolicy } from "@/lib/rate-limit";
 import type { Business } from "@/lib/types";
@@ -22,8 +23,9 @@ export async function POST(request: Request) {
     const business = businessFrom(body.business);
     policies = authRatePolicies("employee-session", request, business);
     await assertRateLimit(policies);
-    const session = await createEmployeeSession(business, String(body.pin || ""));
+    const session = await createEmployeeSession(business, String(body.pin || ""), { label: String(body.deviceLabel || ""), userAgent: request.headers.get("user-agent") || "" });
     await clearRateLimit(policies);
+    await recordOnboardingAppSignIn(session.employeeId).catch((error) => console.error("[employee/session] onboarding sign-in mark failed", error));
     return Response.json({ authenticated: true, session });
   } catch (error) {
     if (policies.length && !(error instanceof RateLimitError)) {

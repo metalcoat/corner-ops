@@ -1,6 +1,7 @@
 "use client";
 
 import { requestFailure } from "@/app/client-http";
+import { useSiteBrand } from "@/app/brand-context";
 import { FormEvent, Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import "../ops/control-center.css";
@@ -11,6 +12,7 @@ async function message(response: Response): Promise<string> {
 }
 
 function ResetPasswordForm() {
+  const brand = useSiteBrand();
   const params = useSearchParams();
   const token = useMemo(() => params.get("token") || "", [params]);
   const [busy, setBusy] = useState(false);
@@ -40,7 +42,7 @@ function ResetPasswordForm() {
 
   return <main className="controlPage" style={{ display: "grid", placeItems: "center" }}>
     <section className="controlCard" style={{ maxWidth: 540, width: "100%" }}>
-      <p className="eyebrow">Corner Ops account recovery</p>
+      <p className="eyebrow">{brand.name} account recovery</p>
       <h1>Choose a new password</h1>
       {!token && <div className="noticeBar">The reset token is missing. Request another reset email.</div>}
       {notice && <div className="noticeBar">{notice}</div>}

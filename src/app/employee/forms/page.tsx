@@ -3,6 +3,7 @@
 import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useState } from "react";
 import "./forms.css";
+import I9Documents from "./i9-documents";
 
 type FormType = "W4" | "IT2104" | "I9" | "PAY_NOTICE" | "MEAL_POLICY";
 type FormStatus = "Assigned" | "Employee Signed" | "Employer Review" | "Completed" | "Superseded";
@@ -89,9 +90,11 @@ export default function EmployeeFormsPage() {
         body: JSON.stringify({ id: selected.id, signatureName, payload }),
       });
       if (!response.ok) throw new Error(await responseMessage(response));
+      const wasI9 = selected.formType === "I9";
       setSelected(null);
       await load();
-      setNotice("Form signed, locked, and submitted.");
+      if (wasI9) await openForm(selected.id);
+      setNotice(wasI9 ? "Section 1 signed. Now add copies of the documents you chose, below." : "Form signed, locked, and submitted.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Form submission failed.");
     } finally {
@@ -130,6 +133,7 @@ export default function EmployeeFormsPage() {
       <section className="employmentFormsCard employmentFormWork">
         {!selected && <div className="employmentEmptyState"><h2>Select a form</h2><p>Completed forms remain locked. A replacement or pay-rate change creates a new record rather than rewriting the old one.</p></div>}
         {selected && selected.status !== "Assigned" && <div className="employmentEmptyState"><p className="employmentEyebrow">{selected.status}</p><h2>{selected.title}</h2><p>Signed {selected.employeeSignedAt ? new Date(selected.employeeSignedAt).toLocaleString() : "not yet"}. Sensitive tax and identity fields are not redisplayed in Employee Hub after submission.</p><a href={selected.sourceUrl} target="_blank" rel="noreferrer">Open official blank form and instructions</a></div>}
+        {selected && selected.formType === "I9" && selected.status !== "Assigned" && <I9Documents formId={selected.id} locked={selected.status === "Completed" || selected.status === "Superseded"} />}
         {selected?.status === "Assigned" && <form className="employmentForm" onSubmit={submit}>
           <header><div><p className="employmentEyebrow">{selected.templateVersion}</p><h2>{selected.title}</h2><p>Effective {dateLabel(selected.effectiveDate)}</p></div><a href={selected.sourceUrl} target="_blank" rel="noreferrer">Official form</a></header>
 
@@ -164,7 +168,7 @@ export default function EmployeeFormsPage() {
               <label>Additional NYC withholding<input name="additionalNyc" type="number" min="0" step="0.01" defaultValue="0" /></label>
               <label>Additional Yonkers withholding<input name="additionalYonkers" type="number" min="0" step="0.01" defaultValue="0" /></label>
             </div></div>
-            <div className="employmentCallout">The 2026 worksheet and instructions remain available through the official-form link. Corner Ops records what you submit; it does not give tax advice because apparently payroll was not complicated enough already.</div>
+            <div className="employmentCallout">The 2026 worksheet and instructions remain available through the official-form link. This site records what you submit; it does not give tax advice.</div>
           </>}
 
           {selected.formType === "I9" && <>
@@ -189,10 +193,11 @@ export default function EmployeeFormsPage() {
             <div><span>Position</span><strong>{text(employee.position)}</strong></div>
             <div><span>Regular hourly rate</span><strong>{dollars(initial.regularRate)}</strong></div>
             {initial.secondaryRate !== null && initial.secondaryRate !== undefined && <div><span>Secondary or tipped rate</span><strong>{dollars(initial.secondaryRate)}</strong></div>}
-            <div><span>Overtime rate shown</span><strong>{dollars(initial.overtimeRate)}</strong></div>
+            <div><span>{initial.tippedOvertimeRate ? "Overtime rate, in-store" : "Overtime rate shown"}</span><strong>{dollars(initial.overtimeRate)}</strong></div>
+            {initial.tippedOvertimeRate !== null && initial.tippedOvertimeRate !== undefined && <div><span>Overtime rate, driving (tipped)</span><strong>{dollars(initial.tippedOvertimeRate)}</strong><small>1.5 × minimum wage minus the tip credit</small></div>}
             <div><span>Tip credit or allowance shown</span><strong>{dollars(initial.tipCreditOrAllowance)}</strong></div>
             <div><span>Pay frequency</span><strong>{text(employer.payFrequency)}</strong><small>Regular payday: {text(employer.payday)}</small></div>
-          </div><div className="employmentCallout">I acknowledge receiving this written notice before beginning work at the stated rate or before the stated rate change becomes effective.</div></div>}
+          </div>{Boolean(initial.overtimeByRoleAgreement) && <div className="employmentCallout"><strong>Overtime by job:</strong> {text(initial.overtimeByRoleAgreement)}</div>}<div className="employmentCallout">I acknowledge receiving this written notice before beginning work at the stated rate or before the stated rate change becomes effective.</div></div>}
 
           {selected.formType === "MEAL_POLICY" && <div className="employmentSection"><h3>Meal-period acknowledgment</h3><div className="employmentPolicyText">{text(initial.statement)}</div></div>}
 

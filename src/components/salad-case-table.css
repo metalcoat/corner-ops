@@ -1,0 +1,12 @@
+.saladCase{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:.92em}
+.saladCase th,.saladCase td{padding:6px 6px;border-bottom:1px solid color-mix(in srgb,currentColor 18%,transparent);text-align:left;vertical-align:top}
+.saladCase thead th{font-size:.78em;font-weight:700;opacity:.7;text-transform:uppercase;letter-spacing:.05em}
+.saladCase tbody th{font-weight:800}
+.saladCase tbody th small{display:block;font-size:.78em;font-weight:800}
+.saladCase td{white-space:nowrap}
+.saladCase tr.last{background:#f59e0b2e}.saladCase tr.last th small{color:#fbbf24}
+.saladCase tr.past{background:#ef444433}.saladCase tr.past th small{color:#fca5a5}
+.saladCase tr.last th,.saladCase tr.past th{box-shadow:inset 4px 0 0 currentColor}
+.saladCase tr.last th{color:#fcd34d}.saladCase tr.past th{color:#fca5a5}
+.saladCaseEmpty{opacity:.7}
+.saladCase.fryers{margin-top:10px}.saladCase.fryers thead th:first-child{color:#f0b35a;opacity:1}

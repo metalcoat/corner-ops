@@ -1,5 +1,7 @@
+import { splitOvertimeByRole, type WorkSegment } from "@/lib/payroll-overtime-rules";
 import { getSql } from "@/lib/db";
 import { newYorkDateTime, payrollWeekBounds as weekBounds } from "@/lib/payroll-week";
+import { allocateSquareTipAfterFee } from "@/lib/square-tip-fee";
 import type { Business } from "@/lib/types";
 
 const TIME_ZONE = "America/New_York";
@@ -36,6 +38,8 @@ type TikiPayment = {
   orderId: string;
   time: Date;
   tip: number;
+  amount: number;
+  processingFeeCents: number | null;
 };
 
 type SummaryRow = {
@@ -122,6 +126,20 @@ function rawObject(value: unknown): Record<string, unknown> {
     }
   }
   return {};
+}
+
+function squareProcessingFeeCents(value: unknown): number | null {
+  const fees = rawObject(value).processing_fee;
+  if (!Array.isArray(fees)) return null;
+  let total = 0;
+  for (const fee of fees) {
+    const amount = (fee as Record<string, unknown> | null)?.amount_money;
+    const cents = (amount as Record<string, unknown> | null)?.amount;
+    const parsed = Number(cents);
+    if (!Number.isSafeInteger(parsed)) return null;
+    total += parsed;
+  }
+  return Math.max(0, total);
 }
 
 function rawHasClock(value: unknown, fields: string[]): boolean {
@@ -251,6 +269,28 @@ function rowFor(summary: Map<string, SummaryRow>, employeeName: string): Summary
   };
   summary.set(employee, row);
   return row;
+}
+
+/** Each employee's worked time in order, split where a driver shift turns tipped (after 3 PM). */
+function workSegments(shifts: Shift[]): Map<string, WorkSegment[]> {
+  const segments = new Map<string, WorkSegment[]>();
+  for (const shift of shifts) {
+    if (!shift.employeeName || /^cover$/i.test(shift.employeeName)) continue;
+    const employee = canonicalEmployeeName(shift.employeeName);
+    const list = segments.get(employee) || [];
+    const tippedHours = driverHoursAfterThree(shift);
+    const total = durationHours(shift);
+    const start = shift.clockIn || shift.clockOut || new Date(0);
+    if (tippedHours > 0 && shift.clockIn && shift.clockOut) {
+      const tippedStart = new Date(shift.clockOut.getTime() - tippedHours * 3_600_000);
+      if (total - tippedHours > 0) list.push({ start, hours: total - tippedHours, tipped: false });
+      list.push({ start: tippedStart, hours: tippedHours, tipped: true });
+    } else {
+      list.push({ start, hours: total, tipped: false });
+    }
+    segments.set(employee, list);
+  }
+  return segments;
 }
 
 function summarizeShifts(shifts: Shift[]) {
@@ -560,14 +600,18 @@ function allocateTikiTips(shifts: Shift[], payments: TikiPayment[], summary: Map
       continue;
     }
 
-    const allocations = splitCents(tipCents, eligible.length);
+    const allocations = allocateSquareTipAfterFee(
+      tipCents, eligible.length, Math.round((payment.amount + payment.tip) * 100), payment.processingFeeCents,
+    );
     eligible.forEach((shift, index) => {
-      const amount = allocations[index] / 100;
+      const allocation = allocations[index];
+      const gross = allocation.grossCents / 100;
+      const net = allocation.netCents / 100;
       const row = rowFor(summary, shift.employeeName);
-      row.tipsBeforeFee = Math.round((row.tipsBeforeFee + amount) * 100) / 100;
-      row.pickupTipsBeforeFee = Math.round((row.pickupTipsBeforeFee + amount) * 100) / 100;
-      row.tips = Math.round((row.tips + amount) * 100) / 100;
-      row.pickupTips = Math.round((row.pickupTips + amount) * 100) / 100;
+      row.tipsBeforeFee = Math.round((row.tipsBeforeFee + gross) * 100) / 100;
+      row.pickupTipsBeforeFee = Math.round((row.pickupTipsBeforeFee + gross) * 100) / 100;
+      row.tips = Math.round((row.tips + net) * 100) / 100;
+      row.pickupTips = Math.round((row.pickupTips + net) * 100) / 100;
       details.push({
         transactionId: payment.transactionId,
         sourceTransactionId: payment.transactionId,
@@ -577,12 +621,14 @@ function allocateTikiTips(shifts: Shift[], payments: TikiPayment[], summary: Map
         orderId: payment.orderId,
         orderType: "Square payment",
         originalTip: payment.tip,
-        allocatedTipBeforeFee: amount,
-        feeAmount: 0,
-        allocatedTip: amount,
+        allocatedTipBeforeFee: gross,
+        feeAmount: allocation.feeCents / 100,
+        allocatedTip: net,
         employee: canonicalEmployeeName(shift.employeeName),
         splitCount: eligible.length,
-        rule: "Square tip: equally split among tip-eligible Tiki employees clocked in",
+        rule: payment.processingFeeCents === null || payment.amount < 0
+          ? "Square tip: fee unavailable; gross tip split among eligible employees"
+          : "Square tip: processing fee share (up to 3.5%) deducted, then split among eligible employees",
       });
     });
   }
@@ -602,7 +648,7 @@ async function tikiPayrollSummary(weekStart: string) {
       ORDER BY clock_in
     `,
     getSql()`
-      SELECT external_payment_id, order_id, created_at_square, tip_amount
+      SELECT external_payment_id, order_id, created_at_square, amount, tip_amount, raw
       FROM square_payments
       WHERE business = 'Tiki'
         AND created_at_square >= ${bounds.start.toISOString()}
@@ -629,6 +675,8 @@ async function tikiPayrollSummary(weekStart: string) {
     orderId: String(row.order_id || ""),
     time: dateValue(row.created_at_square),
     tip: numberValue(row.tip_amount),
+    amount: numberValue(row.amount),
+    processingFeeCents: squareProcessingFeeCents(row.raw),
   })).filter((payment): payment is TikiPayment => Boolean(payment.transactionId && payment.time && payment.tip));
 
   const summary = summarizeShifts(shifts);
@@ -655,9 +703,11 @@ async function tikiPayrollSummary(weekStart: string) {
   }).sort((left, right) => left.employee.localeCompare(right.employee));
 
   const tipJoinIssues = tipDetails.filter((detail) => detail.employee === "Unallocated");
+  const processingFeeReviewCount = payments.filter((payment) => payment.processingFeeCents === null || payment.amount < 0).length;
   return {
     business: "Tiki" as const,
-    source: "Square tips · split equally among tip-eligible Tiki employees clocked in",
+    source: "Square tips · actual processing fee share capped at 3.5% · split among eligible employees clocked in",
+    processingFeeReviewCount,
     weekStart,
     weekEnd: new Date(bounds.end.getTime() - 1).toISOString(),
     rows,
@@ -862,6 +912,7 @@ export async function payrollSummary(business: Business, weekStart: string) {
     };
   });
 
+  const segmentsByEmployee = workSegments(shifts);
   const rows = [...summary.values()]
     .map((row) => {
       const hours = Math.round(row.hours * 100) / 100;
@@ -869,12 +920,18 @@ export async function payrollSummary(business: Business, weekStart: string) {
       const straightTimeHours = Math.round(Math.max(0, hours - overtimeHours) * 100) / 100;
       const driverTipHours = Math.round(Math.min(row.driverTipHours, straightTimeHours) * 100) / 100;
       const regularHours = Math.round(Math.max(0, straightTimeHours - driverTipHours) * 100) / 100;
+      // Second overtime rule: which role each hour past 40 fell in (in the order worked).
+      const byRole = splitOvertimeByRole(segmentsByEmployee.get(row.employee) || []);
       return {
         ...row,
         hours,
         driverTipHours,
         regularHours,
         overtimeHours,
+        overtimeRegularHours: byRole.regularOvertimeHours,
+        overtimeTippedHours: byRole.tippedOvertimeHours,
+        straightRegularHoursByRole: byRole.regularStraightHours,
+        straightTippedHoursByRole: byRole.tippedStraightHours,
         tipsBeforeFee: Math.round(row.tipsBeforeFee * 100) / 100,
         pickupTipsBeforeFee: Math.round(row.pickupTipsBeforeFee * 100) / 100,
         deliveryTipsBeforeFee: Math.round(row.deliveryTipsBeforeFee * 100) / 100,

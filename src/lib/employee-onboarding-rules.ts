@@ -1,0 +1,202 @@
+import { createHash, randomBytes } from "node:crypto";
+import { STORE_PHONE, type OnboardingStep } from "./employee-onboarding-shared";
+
+export { STORE_PHONE, TEAM_APP_APK_URL, type OnboardingStep, type OnboardingStepStatus } from "./employee-onboarding-shared";
+
+/** Pure rules for the new-hire self-setup link; the database side is employee-onboarding.ts. */
+
+export const ONBOARDING_LINK_DAYS = 7;
+
+export function newOnboardingToken(): string {
+  return randomBytes(24).toString("base64url");
+}
+
+export function onboardingTokenHash(token: string): string {
+  return createHash("sha256").update(`employee-onboarding:${token}`, "utf8").digest("hex");
+}
+
+export function validOnboardingTokenShape(token: unknown): token is string {
+  return typeof token === "string" && /^[A-Za-z0-9_-]{32}$/.test(token);
+}
+
+export function onboardingExpiry(now = new Date()): Date {
+  return new Date(now.getTime() + ONBOARDING_LINK_DAYS * 24 * 60 * 60 * 1000);
+}
+
+export type InviteState = { expiresAt: Date; revokedAt: Date | null };
+
+export function inviteUsable(invite: InviteState | null | undefined, now = new Date()): boolean {
+  return Boolean(invite && !invite.revokedAt && invite.expiresAt.getTime() > now.getTime());
+}
+
+export function onboardingLink(baseUrl: string, token: string): string {
+  return `${baseUrl.replace(/\/+$/, "")}/employee/welcome/${token}`;
+}
+
+function givenName(value: string): string {
+  return value.trim().split(/\s+/)[0] || "there";
+}
+
+/** The one text a new hire gets. Kept under 300 characters (two SMS segments). */
+export function onboardingSmsText(input: { name: string; link: string; businessName?: string; storePhone?: string }): string {
+  const business = input.businessName || "Corner Deli";
+  const phone = input.storePhone || STORE_PHONE;
+  return [
+    `${business}: Welcome to the team, ${givenName(input.name)}!`,
+    `Set up your employee account, new-hire forms, handbook, direct deposit and schedule app here: ${input.link}`,
+    `This link is just for you and expires in ${ONBOARDING_LINK_DAYS} days. Questions? Call ${phone}. Reply STOP to opt out.`,
+  ].join("\n");
+}
+
+/**
+ * Whether to only log the text instead of sending it. Production (Telnyx configured, no override) sends.
+ * Anywhere else, or with ONBOARDING_SMS_LOG_ONLY=true, the text is logged unless the number is listed
+ * in SMS_TEST_NUMBERS (comma-separated, any format).
+ */
+export function onboardingSmsLogOnly(phone: string, env: Record<string, string | undefined> = process.env): boolean {
+  const digits = (value: string) => value.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
+  const testNumbers = String(env.SMS_TEST_NUMBERS || "").split(",").map(digits).filter(Boolean);
+  if (testNumbers.includes(digits(phone))) return false;
+  if (!env.TELNYX_API_KEY?.trim() || !env.TELNYX_FROM_NUMBER?.trim()) return true;
+  return env.ONBOARDING_SMS_LOG_ONLY?.trim() === "true";
+}
+
+export type OnboardingFacts = {
+  textStatus: string;
+  textSentAt: string | null;
+  linkExpiresAt: string | null;
+  linkUsable: boolean;
+  accountSet: boolean;
+  formsAssigned: number;
+  formsSigned: number;
+  formsAwaitingEmployer: number;
+  handbookRequired: boolean;
+  handbookAcknowledged: boolean;
+  directDeposit: "none" | "assigned" | "completed";
+  appSignIns: number;
+  payrollReliefEeNum: string | null;
+  payrollReliefApplies: boolean;
+  hourlyRateSet: boolean;
+  /** An I-9 is assigned; its document copies are a step of their own. */
+  i9Assigned?: boolean;
+  /** Copies cover List A, or List B + List C. */
+  i9DocumentsUploaded?: boolean;
+  /** Steps an owner bypassed: step key → "Bypassed by … on …". */
+  waived?: Record<string, string>;
+};
+
+/** A bypassed step counts as done; one that is done anyway keeps its own status and detail. */
+function applyWaivers(steps: OnboardingStep[], waived: Record<string, string> | undefined): OnboardingStep[] {
+  if (!waived) return steps;
+  return steps.map((step) => waived[step.key] && step.status !== "done" ? { ...step, status: "done" as const, detail: waived[step.key], waived: true } : step);
+}
+
+/** The manager's per-hire checklist, in the order the new hire works through it. */
+export function onboardingChecklist(facts: OnboardingFacts): OnboardingStep[] {
+  const steps: OnboardingStep[] = [];
+  const textSent = facts.textStatus === "sent" || facts.textStatus === "logged";
+  steps.push({
+    key: "text",
+    label: "Setup text",
+    status: textSent ? (facts.linkUsable || facts.accountSet ? "done" : "manager") : "manager",
+    detail: !textSent
+      ? (facts.textStatus === "pending" ? "Not sent yet." : `Not sent: ${facts.textStatus}. Use Resend text.`)
+      : facts.linkUsable || facts.accountSet
+        ? `${facts.textStatus === "logged" ? "Logged (dev, not texted)" : "Sent"}${facts.textSentAt ? ` ${facts.textSentAt}` : ""}.`
+        : "The link expired before setup. Use Resend text.",
+  });
+  steps.push({ key: "account", label: "Account & PIN", status: facts.accountSet ? "done" : "waiting", detail: facts.accountSet ? "PIN chosen; can sign in." : "Waiting for the new hire to open the link and choose a PIN." });
+  steps.push({
+    key: "forms",
+    label: "New-hire forms",
+    status: !facts.formsAssigned ? "manager" : facts.formsSigned >= facts.formsAssigned ? (facts.formsAwaitingEmployer ? "manager" : "done") : "waiting",
+    detail: !facts.formsAssigned
+      ? "No forms assigned. Complete the employer profile on Paperwork, then assign the packet."
+      : `${facts.formsSigned} of ${facts.formsAssigned} signed${facts.formsAwaitingEmployer ? `; ${facts.formsAwaitingEmployer} need your I-9 review` : ""}.`,
+  });
+  if (facts.i9Assigned) steps.push({ key: "i9docs", label: "I-9 document copies", status: facts.i9DocumentsUploaded ? "done" : "waiting", detail: facts.i9DocumentsUploaded ? "Uploaded. Check the originals on their first day, then complete Section 2; the copies are deleted automatically." : "Not uploaded yet (List A, or List B + List C, their choice). They bring the originals on day 1." });
+  if (!facts.hourlyRateSet) steps.push({ key: "pay", label: "Pay rate notice", status: "manager", detail: "Set the hourly rate, then send the NY pay notice from Paperwork." });
+  if (facts.handbookRequired) steps.push({ key: "handbook", label: "Handbook", status: facts.handbookAcknowledged ? "done" : "waiting", detail: facts.handbookAcknowledged ? "Read and signed." : "Not signed yet." });
+  steps.push({
+    key: "deposit",
+    label: "Direct deposit",
+    status: facts.directDeposit === "completed" ? "done" : "optional",
+    detail: facts.directDeposit === "completed" ? "Election submitted." : "Optional; not submitted yet.",
+  });
+  steps.push({ key: "app", label: "Schedule app", status: facts.appSignIns > 0 ? "done" : "waiting", detail: facts.appSignIns > 0 ? "Signed in to the app or Employee Hub with their PIN." : "Not signed in yet." });
+  if (facts.payrollReliefApplies) {
+    steps.push({
+      key: "payroll",
+      label: "Payroll Relief",
+      status: facts.payrollReliefEeNum ? "done" : "manager",
+      detail: facts.payrollReliefEeNum ? `Matched to EE #${facts.payrollReliefEeNum}.` : "Add them in Payroll Relief, refresh the list on Payroll, then match them.",
+    });
+  }
+  return applyWaivers(steps, facts.waived);
+}
+
+export function onboardingComplete(steps: OnboardingStep[]): boolean {
+  return steps.every((step) => step.status === "done" || step.status === "optional");
+}
+
+/**
+ * The new hire's own steps, in the order they must do them. A step they still owe locks every
+ * later step; a step waiting on the store (forms not assigned yet) does not, and direct deposit is optional.
+ */
+export function employeeOnboardingSteps(facts: OnboardingFacts): OnboardingStep[] {
+  const steps: OnboardingStep[] = [
+    { key: "account", label: "Employee account", status: facts.accountSet ? "done" : "waiting", detail: facts.accountSet ? "Your PIN is set." : "Choose your PIN." },
+    {
+      key: "forms",
+      label: "New-hire forms",
+      status: !facts.formsAssigned ? "manager" : facts.formsSigned >= facts.formsAssigned ? "done" : "waiting",
+      detail: !facts.formsAssigned ? "Your manager hasn't assigned your forms yet." : `${facts.formsSigned} of ${facts.formsAssigned} done: W-4, IT-2104, I-9 and the rest.`,
+    },
+  ];
+  if (facts.i9Assigned) steps.push({ key: "i9docs", label: "I-9 document copies", status: facts.i9DocumentsUploaded ? "done" : "waiting", detail: facts.i9DocumentsUploaded ? "Uploaded. On your first day, bring the original documents for your manager to see." : "On your I-9 under Forms: photos of one List A document, or one List B and one List C (you choose which). Bring the originals on your first day." });
+  if (facts.handbookRequired) steps.push({ key: "handbook", label: "Employee handbook", status: facts.handbookAcknowledged ? "done" : "waiting", detail: facts.handbookAcknowledged ? "Signed." : "Read it and sign at the bottom." });
+  steps.push({ key: "deposit", label: "Direct deposit (optional)", status: facts.directDeposit === "completed" ? "done" : "optional", detail: facts.directDeposit === "completed" ? "Submitted." : "Get paid straight to your bank account, or skip this." });
+  steps.push({ key: "app", label: "Schedule app", status: facts.appSignIns > 0 ? "done" : "waiting", detail: facts.appSignIns > 0 ? "You're signed in on the app." : "Install the app and sign in with your PIN." });
+  let blocker = "";
+  return applyWaivers(steps, facts.waived).map((step) => {
+    if (step.status !== "waiting") return step;
+    if (blocker) return { ...step, status: "locked" as const, detail: `Opens after: ${blocker}.` };
+    blocker = step.label.toLowerCase();
+    return step;
+  });
+}
+
+/** What still stands between the new hire and the schedule (optional steps never count). */
+export function onboardingStillToDo(steps: OnboardingStep[]): string[] {
+  return steps.filter((step) => step.status !== "done" && step.status !== "optional").map((step) => step.label.replace(/ \(optional\)$/, ""));
+}
+
+function listWords(items: string[]): string {
+  return items.length <= 1 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+export const ONBOARDING_REMINDER_LIMIT = 7;
+
+/**
+ * One reminder a day, from the day after the setup text, between 10 AM and 7 PM Eastern,
+ * at most ONBOARDING_REMINDER_LIMIT times, and never once the new hire's steps are done.
+ */
+export function onboardingReminderDue(input: {
+  now: Date; invitedAt: Date; lastReminderAt: Date | null; remindersSent: number; stillToDo: string[];
+}): boolean {
+  if (!input.stillToDo.length || input.remindersSent >= ONBOARDING_REMINDER_LIMIT) return false;
+  const day = (value: Date) => value.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  const hour = Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", hourCycle: "h23" }).format(input.now));
+  if (hour < 10 || hour >= 19) return false;
+  if (day(input.now) <= day(input.invitedAt)) return false;
+  return !input.lastReminderAt || day(input.lastReminderAt) < day(input.now);
+}
+
+export function onboardingReminderText(input: { name: string; stillToDo: string[]; link: string; businessName?: string; storePhone?: string }): string {
+  const business = input.businessName || "Corner Deli";
+  return [
+    `${business}: Hi ${givenName(input.name)}, your new-hire setup isn't finished yet. Still to do: ${listWords(input.stillToDo.map((item) => item.toLowerCase()))}.`,
+    `We can't put you on the schedule until everything is complete. Finish here: ${input.link}`,
+    `Questions? Call ${input.storePhone || STORE_PHONE}. Reply STOP to opt out.`,
+  ].join("\n");
+}

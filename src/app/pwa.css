@@ -4,6 +4,10 @@
   font-family: inherit;
 }
 
+.employee-messages-open .pwaControl{display:none}
+
+@media (min-width:1101px){body:has(.employeeMessagesDock) .pwaControl{right:390px}}
+
 .pwaControl-top-right {
   top: max(14px, env(safe-area-inset-top));
   right: max(14px, env(safe-area-inset-right));

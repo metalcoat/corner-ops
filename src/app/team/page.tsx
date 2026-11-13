@@ -1,9 +1,13 @@
 import "./team.css";
+import { headers } from "next/headers";
+import { siteBrandForHost } from "@/lib/site-brand";
 
-export default function TeamHome() {
+export default async function TeamHome() {
+  const brand = siteBrandForHost((await headers()).get("host") || "");
   return <main className="teamHome">
     <section className="teamHomeCard">
-      <p className="teamEyebrow">Corner Ops</p>
+      <img className="teamHomeLogo" src={brand.icon} alt="" />
+      <p className="teamEyebrow">{brand.name}</p>
       <h1>Team workspace</h1>
       <p>Sign in to your business account to see your team information.</p>
       <div className="teamHomeLinks">

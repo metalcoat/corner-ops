@@ -6,7 +6,6 @@ import {
   exchangePlaidPublicToken,
   integrationDashboard,
   syncBankConnection,
-  syncSquareConnection,
 } from "@/lib/integrations";
 import { createPlaidAccountSelectionToken, createResilientPlaidLinkToken } from "@/lib/plaid-link";
 import { runScheduledOperations } from "@/lib/scheduler";
@@ -124,11 +123,6 @@ export async function POST(request: Request) {
       const business = businessFrom(body.business);
       if (!canAccessBusiness(session, business)) return Response.json({ error: "Business access denied." }, { status: 403 });
       return Response.json(await syncBankConnection(String(body.connectionId || ""), business));
-    }
-
-    if (action === "square-sync") {
-      if (!canAccessBusiness(session, "Tiki")) return Response.json({ error: "Business access denied." }, { status: 403 });
-      return Response.json(await syncSquareConnection(body.connectionId ? String(body.connectionId) : undefined));
     }
 
     if (action === "transaction-approve") {

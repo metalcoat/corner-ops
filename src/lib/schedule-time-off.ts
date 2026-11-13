@@ -69,11 +69,13 @@ export async function enforceScheduleTimeOff(input: {
   startsAt: string | Date;
   endsAt: string | Date;
   acknowledgePendingTimeOff?: boolean;
+  /** A manager confirmed the warning. Employee swaps and pickups never pass this, so they stay blocked. */
+  acknowledgeApprovedTimeOff?: boolean;
 }) {
   const conflicts = await scheduleTimeOffConflicts(input);
   const approved = conflicts.find((conflict) => conflict.status === "Approved");
-  if (approved) {
-    throw new Error(`${approved.employeeName} has approved time off ${rangeLabel(approved)}. Reassign this shift or leave it open.`);
+  if (approved && !input.acknowledgeApprovedTimeOff) {
+    throw new Error(`${approved.employeeName} has approved time off ${rangeLabel(approved)}. Confirm the warning to assign this shift anyway.`);
   }
   const pending = conflicts.find((conflict) => conflict.status === "Pending");
   if (pending && !input.acknowledgePendingTimeOff) {

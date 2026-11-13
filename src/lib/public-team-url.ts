@@ -6,7 +6,7 @@ const PRODUCTION_TEAM_URLS: Record<Business, string> = {
 };
 
 export function publicTeamBaseUrl(business: Business): string {
-  if (process.env.VERCEL_ENV === "production") return PRODUCTION_TEAM_URLS[business];
+  if (process.env.APP_ENV === "production" || process.env.VERCEL_ENV === "production") return PRODUCTION_TEAM_URLS[business];
 
   const configured = process.env.EMPLOYEE_APP_URL?.trim() || process.env.APP_URL?.trim();
   if (configured) return configured.replace(/\/(?:employee)?\/?$/, "");

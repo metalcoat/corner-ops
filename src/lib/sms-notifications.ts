@@ -27,6 +27,7 @@ type TelnyxMessagePayload = {
 const SMS_CONCURRENCY = 6;
 
 function configuration() {
+  if (process.env.LOCAL_DEVELOPMENT === "true" && process.env.VALIDATION_DISABLE_OUTBOUND === "1") return null;
   const apiKey = process.env.TELNYX_API_KEY?.trim();
   const from = process.env.TELNYX_FROM_NUMBER?.trim();
   if (!apiKey || !from) return null;
@@ -159,4 +160,20 @@ export async function deliverSms(input: {
     failures,
     accepted,
   };
+}
+
+export async function sendTransactionalSms(phone: string, text: string) {
+  if (process.env.LOCAL_DEVELOPMENT === "true" && process.env.VALIDATION_DISABLE_OUTBOUND === "1")
+    throw new Error("Outbound SMS is disabled in validation scripts.");
+  const configured = configuration();
+  if (!configured) throw new Error("SMS verification is not configured.");
+  const to = normalizeSmsPhone(phone);
+  if (!to) throw new Error("Enter a valid mobile phone number.");
+  const response = await fetch("https://api.telnyx.com/v2/messages", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${configured.apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ from: configured.from, to, text: text.trim().slice(0, 600), type: "SMS" }),
+  });
+  const payload = await response.json().catch(() => null) as { errors?: Array<{ detail?: string; title?: string }> } | null;
+  if (!response.ok) throw new Error(payload?.errors?.[0]?.detail || payload?.errors?.[0]?.title || "Verification text could not be sent.");
 }

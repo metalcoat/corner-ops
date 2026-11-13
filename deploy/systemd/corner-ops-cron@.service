@@ -1,0 +1,9 @@
+[Unit]
+Description=Corner Ops scheduled job: %i
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=chris
+ExecStart=/opt/corner-ops/runtime/deploy/run-cron.sh %i

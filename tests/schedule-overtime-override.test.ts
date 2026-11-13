@@ -16,7 +16,7 @@ test("schedule publishing keeps 38-plus hours as a warning and permits explicit 
   assert.doesNotMatch(board, /disabled=\{busy \|\| !weekShifts\.length \|\| schedulePublishBlocked/);
   assert.doesNotMatch(board, /disabled=\{busy \|\| !weekShifts\.length \|\| !publishAnalysis\.canPublish/);
   assert.match(board, /Click to see the schedule issues preventing publication/);
-  assert.match(board, /open=\{schedulePublishBlocked \|\| overtimeApprovalRequired\}/);
+  assert.match(board, /open=\{schedulePublishBlocked \|\| overtimeApprovalRequired \|\| approvedTimeOffShiftConflicts\.length > 0\}/);
 });
 
 test("server requires and records the manager overtime approval", () => {

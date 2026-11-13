@@ -1,9 +1,11 @@
 import { getSession } from "@/lib/auth";
 import { getEmployeeSession } from "@/lib/employee-auth";
+import { getPosSession } from "@/lib/pos-auth";
 import { apiError, unauthorized } from "@/lib/http";
 import {
   pushStatus,
   removePushSubscription,
+  requestOrigin,
   savePushSubscription,
   sendTestPush,
   type PushActor,
@@ -13,9 +15,14 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-type AudiencePreference = "owner" | "employee" | "";
+type AudiencePreference = "owner" | "employee" | "pos" | "";
 
 async function currentActor(preference: AudiencePreference = ""): Promise<PushActor | null> {
+  if (preference === "pos") {
+    const pos = await getPosSession(false);
+    if (pos) return { type: "employee", employeeId: pos.employeeId, business: "Corner Deli" };
+    return null;
+  }
   if (preference === "employee") {
     const employee = await getEmployeeSession();
     if (employee) return { type: "employee", employeeId: employee.employeeId, business: employee.business };
@@ -28,7 +35,7 @@ async function currentActor(preference: AudiencePreference = ""): Promise<PushAc
 }
 
 function preference(value: unknown): AudiencePreference {
-  return value === "employee" || value === "owner" ? value : "";
+  return value === "employee" || value === "owner" || value === "pos" ? value : "";
 }
 
 export async function GET(request: Request) {
@@ -55,6 +62,7 @@ export async function POST(request: Request) {
         ...subscription,
         userAgent: String(body.userAgent || ""),
         deviceLabel: String(body.deviceLabel || ""),
+        origin: requestOrigin(request.headers),
       }), { status: 201 });
     }
 

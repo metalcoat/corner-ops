@@ -8,8 +8,8 @@ const source = (path: string) => readFileSync(join(root, path), "utf8");
 
 test("message migration snapshots recipients and excludes later employees from old team messages", () => {
   const migration = source("db/migrations/0009_message_conversations.sql");
-  assert.match(migration, /ADD COLUMN conversation_key text/);
-  assert.match(migration, /CREATE TABLE public\.employee_message_recipients/);
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS conversation_key text/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.employee_message_recipients/);
   assert.match(migration, /e\.created_at <= m\.created_at/);
   assert.match(migration, /ON CONFLICT \(message_id, employee_id\) DO NOTHING/);
   assert.match(migration, /employee_messages_message_type_check/);

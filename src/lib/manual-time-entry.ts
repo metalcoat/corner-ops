@@ -18,7 +18,6 @@ async function ensureManualTimeAuditSchema() {
   if (!auditSchemaPromise) {
     auditSchemaPromise = (async () => {
       await ensureSchema();
-      const sql = getSql();
     })().catch((error) => {
       auditSchemaPromise = null;
       throw error;

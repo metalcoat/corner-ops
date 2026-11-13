@@ -1,0 +1,26 @@
+.carTabletSettings .carTablet header{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center}
+.carTabletSettings .carTablet header>div:first-child{display:grid;gap:2px}
+.carTabletState{font-weight:800}
+.carTablet.online .carTabletState{color:#137b3f!important}
+.carTablet.offline .carTabletState{color:#a1361f!important}
+.carTablet.revoked{opacity:.6}
+.carTabletFacts{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px 18px;margin:10px 0}
+.carTabletFacts div{display:grid;gap:1px}.carTabletFacts dt{font-size:.72rem;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:#6b6152}.carTabletFacts dd{margin:0}
+.carPairing{display:flex!important;gap:20px;justify-content:space-between;flex-wrap:wrap;align-items:center;border:2px solid #24553e!important;background:#eef7f0!important}
+.carPairingCode{font:900 2.4rem/1.1 ui-monospace,Menlo,monospace;letter-spacing:.12em;color:#17130f!important;margin:6px 0}
+.carPairingServer{font-family:ui-monospace,Menlo,monospace;font-weight:700}
+.carPairNew{margin:14px 0}.carPairNew label{display:grid;gap:4px}
+.carPhotoGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;margin:8px 0}
+.carPhotoGrid button{display:grid!important;gap:4px;padding:6px!important;background:#faf8f3!important;color:#211d17!important;border:1px solid #ddd6ca!important;text-align:left;font-weight:600!important}
+.carPhotoGrid img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:6px;background:#ddd}
+.carPhotoGrid small,.carPhotoGrid span{font-size:.8rem}
+.carPhotoViewer{position:fixed;inset:0;z-index:1000;background:#000d;display:grid;place-items:center;align-content:center;gap:10px;padding:16px}
+.carPhotoViewer img{max-width:min(96vw,1200px);max-height:80vh;border-radius:8px}
+.carPhotoViewer p{color:#fff!important;margin:0}.carPhotoViewer a{color:#9fd3ff}
+.carPhotoCell{position:relative}
+.carPhotoCell>button{width:100%}
+.carPhotoCell.picked>button{outline:3px solid #a1361f;outline-offset:1px}
+.carPhotoPick{position:absolute;top:10px;left:10px;background:#fff;border-radius:6px;padding:4px;display:flex;box-shadow:0 1px 4px #0004}
+.carPhotoPick input{width:22px;height:22px;margin:0}
+.carPhotoTools{margin:6px 0}
+.carTabletSettings button.danger,.carPhotoViewer button.danger,.ocCarPhotos button.danger{background:#a1361f!important;border-color:#a1361f!important;color:#fff!important}
