@@ -1,6 +1,6 @@
 import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
-import { createOnboardingEmployee, issueOnboardingInvite, listOnboardingInProgress, onboardingStatus, sendNewHirePayNotice } from "@/lib/employee-onboarding";
+import { createOnboardingEmployee, issueOnboardingInvite, listOnboardingInProgress, onboardingStatus, sendNewHirePayNotice, setOnboardingStepWaived } from "@/lib/employee-onboarding";
 import type { Business } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -19,8 +19,10 @@ export async function GET(request: Request) {
     const business = businessFrom(params.get("business"));
     if (!canAccessBusiness(session, business)) return Response.json({ error: "Business access denied." }, { status: 403 });
     const employeeId = params.get("employeeId");
-    if (employeeId) return Response.json(await onboardingStatus(business, employeeId));
-    return Response.json({ inProgress: await listOnboardingInProgress(business) });
+    // Owners can bypass a checklist step after checking it themselves.
+    const canBypass = session.role === "Owner" || session.role === "Co-Owner";
+    if (employeeId) return Response.json({ ...await onboardingStatus(business, employeeId), canBypass });
+    return Response.json({ inProgress: (await listOnboardingInProgress(business)).map((status) => ({ ...status, canBypass })) });
   } catch (error) {
     return apiError(error);
   }
@@ -60,6 +62,16 @@ export async function POST(request: Request) {
         actor: session.email,
         actorName: session.displayName,
       }), { status: 201 });
+    }
+    if (action === "waive-step" || action === "unwaive-step") {
+      return Response.json(await setOnboardingStepWaived({
+        business,
+        employeeId: String(body.employeeId || ""),
+        stepKey: String(body.stepKey || ""),
+        waived: action === "waive-step",
+        actor: session.email,
+        role: session.role,
+      }).then((status) => ({ ...status, canBypass: true })));
     }
     return Response.json({ error: "Unknown onboarding action." }, { status: 400 });
   } catch (error) {

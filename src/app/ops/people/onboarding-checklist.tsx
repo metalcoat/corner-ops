@@ -18,6 +18,8 @@ export type OnboardingStatus = {
   stillToDo: string[];
   reminders: { sent: number; last: string | null; status: string };
   steps: OnboardingStep[];
+  /** Owner / Co-Owner: may bypass steps. */
+  canBypass?: boolean;
 };
 
 export type ResendResult = { status: string; detail: string; expiresAt: string; devLink: string | null; text: string };
@@ -62,6 +64,25 @@ export default function OnboardingChecklist({ business, status, onChanged, title
     }
   }
 
+  async function bypass(step: OnboardingStep, waive: boolean) {
+    if (waive && !window.confirm(`Count "${step.label}" as done for ${status.name}? Only do this if you checked it yourself.`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/employee-directory/onboarding", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ business, action: waive ? "waive-step" : "unwaive-step", employeeId: status.employeeId, stepKey: step.key }),
+      });
+      if (!response.ok) throw new Error(await responseMessage(response));
+      onChanged?.();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : "The step could not be changed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const accountSet = status.steps.find((step) => step.key === "account")?.status === "done";
   return <article className="onboardingCard">
     <header>
@@ -80,6 +101,8 @@ export default function OnboardingChecklist({ business, status, onChanged, title
       {status.steps.map((step) => <li key={step.key} className={step.status}>
         <span aria-label={step.status}>{MARK[step.status]}</span>
         <div><strong>{step.label}</strong><small>{step.detail}</small></div>
+        {status.canBypass && step.waived && <button type="button" className="onboardingBypass" disabled={busy} onClick={() => void bypass(step, false)}>Undo bypass</button>}
+        {status.canBypass && !step.waived && step.status !== "done" && step.status !== "optional" && <button type="button" className="onboardingBypass" disabled={busy} onClick={() => void bypass(step, true)}>Bypass</button>}
       </li>)}
     </ol>
     {error && <p className="onboardingError" role="alert">{error}</p>}

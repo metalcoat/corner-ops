@@ -321,6 +321,37 @@ async function payrollReliefMatch(business: Business, name: string): Promise<{ a
   return { applies: true, eeNum: rows[0]?.ee_num || null };
 }
 
+/** Owner bypasses (migration 0062; absent on a database without it, e.g. today's production). */
+async function onboardingWaivers(business: Business, employeeId: string): Promise<Record<string, string>> {
+  const sql = getSql();
+  const present = await sql`SELECT to_regclass('public.employee_onboarding_waivers') IS NOT NULL AS ok` as unknown as Array<{ ok: boolean }>;
+  if (!present[0]?.ok) return {};
+  const rows = await sql`SELECT step_key, waived_by, waived_at FROM employee_onboarding_waivers WHERE business = ${business} AND employee_id = ${employeeId}` as unknown as Array<{ step_key: string; waived_by: string; waived_at: string }>;
+  return Object.fromEntries(rows.map((row) => [row.step_key, `Bypassed by ${row.waived_by} on ${eastern(row.waived_at)}.`]));
+}
+
+/** Steps an owner may mark done by hand (everything on the manager's checklist). */
+const WAIVABLE_STEPS = new Set(["text", "account", "forms", "i9docs", "pay", "handbook", "deposit", "app", "payroll"]);
+
+/** Owner / Co-Owner: count one checklist step as done (or undo that), recorded in the audit log. */
+export async function setOnboardingStepWaived(input: { business: Business; employeeId: string; stepKey: string; waived: boolean; actor: string; role: string }) {
+  if (input.role !== "Owner" && input.role !== "Co-Owner") throw new ValidationError("Only an owner can bypass a setup step.");
+  if (!WAIVABLE_STEPS.has(input.stepKey)) throw new ValidationError("Unknown setup step.");
+  await employeeRow(input.business, input.employeeId);
+  const sql = getSql();
+  if (input.waived) {
+    await sql`
+      INSERT INTO employee_onboarding_waivers (employee_id, business, step_key, waived_by)
+      VALUES (${input.employeeId}, ${input.business}, ${input.stepKey}, ${input.actor})
+      ON CONFLICT (employee_id, step_key) DO NOTHING
+    `;
+  } else {
+    await sql`DELETE FROM employee_onboarding_waivers WHERE employee_id = ${input.employeeId} AND business = ${input.business} AND step_key = ${input.stepKey}`;
+  }
+  await recordAuditEvent({ business: input.business, action: input.waived ? "onboarding-step-bypassed" : "onboarding-step-bypass-undone", actor: input.actor, entityType: "employee", entityId: input.employeeId, details: { step: input.stepKey } });
+  return onboardingStatus(input.business, input.employeeId);
+}
+
 /** The new hire signed in with their PIN from the app or Employee Hub (not the setup link). */
 export async function recordOnboardingAppSignIn(employeeId: string) {
   await getSql()`UPDATE employee_onboarding_invites SET app_signed_in_at = NOW() WHERE employee_id = ${employeeId} AND app_signed_in_at IS NULL`;
@@ -330,7 +361,7 @@ async function onboardingFacts(business: Business, employeeId: string): Promise<
   const sql = getSql();
   const employee = await employeeRow(business, employeeId);
   const handbook = getCornerDeliHandbook();
-  const [invites, forms, handbookRows, deposits, signIns, relief, i9Docs] = await Promise.all([
+  const [invites, forms, handbookRows, deposits, signIns, relief, i9Docs, waived] = await Promise.all([
     sql`SELECT * FROM employee_onboarding_invites WHERE business = ${business} AND employee_id = ${employeeId} ORDER BY created_at DESC LIMIT 1` as unknown as Promise<InviteRow[]>,
     sql`SELECT form_type, status FROM employment_forms WHERE business = ${business} AND employee_id = ${employeeId} AND status <> 'Superseded'` as unknown as Promise<Array<{ form_type: string; status: string }>>,
     sql`SELECT 1 FROM employee_handbook_acknowledgments WHERE employee_id = ${employeeId} AND business = ${business} AND handbook_version = ${handbook.version} AND content_hash = ${handbook.contentHash} LIMIT 1` as unknown as Promise<unknown[]>,
@@ -338,6 +369,7 @@ async function onboardingFacts(business: Business, employeeId: string): Promise<
     sql`SELECT COUNT(*)::int n FROM employee_onboarding_invites WHERE employee_id = ${employeeId} AND app_signed_in_at IS NOT NULL` as unknown as Promise<Array<{ n: number }>>,
     payrollReliefMatch(business, employee.name),
     sql`SELECT DISTINCT d.document_list FROM employment_form_documents d JOIN employment_forms f ON f.id = d.form_id WHERE f.employee_id = ${employeeId} AND f.business = ${business} AND f.form_type = 'I9' AND f.status <> 'Superseded' AND d.deleted_at IS NULL` as unknown as Promise<Array<{ document_list: "A" | "B" | "C" }>>,
+    onboardingWaivers(business, employeeId),
   ]);
   const invite = invites[0] || null;
   const signed = forms.filter((form) => form.status !== "Assigned");
@@ -361,6 +393,7 @@ async function onboardingFacts(business: Business, employeeId: string): Promise<
     hourlyRateSet: Number(employee.hourly_rate) > 0,
     i9Assigned: forms.some((form) => form.form_type === "I9"),
     i9DocumentsUploaded: i9DocumentsComplete(i9Docs.map((row) => row.document_list)),
+    waived,
   };
 }
 

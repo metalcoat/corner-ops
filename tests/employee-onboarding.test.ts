@@ -93,6 +93,22 @@ test("the manager checklist follows the new hire from text to payroll", () => {
   assert.equal(tiki.some((step) => step.key === "handbook" || step.key === "payroll"), false);
 });
 
+test("an owner's bypass counts a step as done, for the checklist and for scheduling", () => {
+  const bypassed = "Bypassed by owner@x.com on Nov 13, 2:00 PM.";
+  const steps = onboardingChecklist(facts({ accountSet: true, formsSigned: 4, formsAwaitingEmployer: 1, handbookAcknowledged: true, appSignIns: 1, payrollReliefEeNum: null, waived: { forms: bypassed, payroll: bypassed } }));
+  const forms = steps.find((step) => step.key === "forms");
+  assert.equal(forms?.status, "done");
+  assert.equal(forms?.waived, true);
+  assert.equal(forms?.detail, bypassed);
+  assert.equal(onboardingComplete(steps), true);
+  // Already done on its own: the bypass changes nothing.
+  assert.equal(steps.find((step) => step.key === "account")?.waived, undefined);
+
+  // The new hire's own list: a bypassed step no longer locks the ones after it.
+  const own = employeeOnboardingSteps(facts({ accountSet: true, formsSigned: 1, handbookAcknowledged: true, appSignIns: 1, waived: { forms: bypassed } }));
+  assert.deepEqual(onboardingStillToDo(own), []);
+});
+
 test("the handbook carries the zero-tolerance alcohol and no-smoking policies", () => {
   const text = (title: RegExp) => {
     const section = CORNER_DELI_HANDBOOK_SECTIONS.find((item) => title.test(item.title));

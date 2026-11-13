@@ -81,7 +81,15 @@ export type OnboardingFacts = {
   i9Assigned?: boolean;
   /** Copies cover List A, or List B + List C. */
   i9DocumentsUploaded?: boolean;
+  /** Steps an owner bypassed: step key → "Bypassed by … on …". */
+  waived?: Record<string, string>;
 };
+
+/** A bypassed step counts as done; one that is done anyway keeps its own status and detail. */
+function applyWaivers(steps: OnboardingStep[], waived: Record<string, string> | undefined): OnboardingStep[] {
+  if (!waived) return steps;
+  return steps.map((step) => waived[step.key] && step.status !== "done" ? { ...step, status: "done" as const, detail: waived[step.key], waived: true } : step);
+}
 
 /** The manager's per-hire checklist, in the order the new hire works through it. */
 export function onboardingChecklist(facts: OnboardingFacts): OnboardingStep[] {
@@ -124,7 +132,7 @@ export function onboardingChecklist(facts: OnboardingFacts): OnboardingStep[] {
       detail: facts.payrollReliefEeNum ? `Matched to EE #${facts.payrollReliefEeNum}.` : "Add them in Payroll Relief, refresh the list on Payroll, then match them.",
     });
   }
-  return steps;
+  return applyWaivers(steps, facts.waived);
 }
 
 export function onboardingComplete(steps: OnboardingStep[]): boolean {
@@ -150,7 +158,7 @@ export function employeeOnboardingSteps(facts: OnboardingFacts): OnboardingStep[
   steps.push({ key: "deposit", label: "Direct deposit (optional)", status: facts.directDeposit === "completed" ? "done" : "optional", detail: facts.directDeposit === "completed" ? "Submitted." : "Get paid straight to your bank account, or skip this." });
   steps.push({ key: "app", label: "Schedule app", status: facts.appSignIns > 0 ? "done" : "waiting", detail: facts.appSignIns > 0 ? "You're signed in on the app." : "Install the app and sign in with your PIN." });
   let blocker = "";
-  return steps.map((step) => {
+  return applyWaivers(steps, facts.waived).map((step) => {
     if (step.status !== "waiting") return step;
     if (blocker) return { ...step, status: "locked" as const, detail: `Opens after: ${blocker}.` };
     blocker = step.label.toLowerCase();
