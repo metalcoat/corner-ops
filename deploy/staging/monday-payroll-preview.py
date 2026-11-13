@@ -4,7 +4,8 @@
 Run by monday-payroll-preview.sh after a fresh production backup has been loaded
 into staging. Builds last week's Corner Deli payroll on staging, restores the
 Payroll Relief employee matches, and emails the owner the summary with a link to
-approve it on the staging payroll page. Sends only to PAYROLL_NOTIFY_EMAIL (or
+approve it on the staging payroll page (approved automatically at 8 PM
+Monday otherwise: deploy/staging/payroll-send.sh). Sends only to PAYROLL_NOTIFY_EMAIL (or
 APP_EMAIL) using the server's SMTP settings; never to staff.
 
   monday-payroll-preview.py [--week YYYY-MM-DD] [--dry-run]
@@ -172,8 +173,9 @@ def main():
     lines += [
         "",
         f"Review and approve (deli Wi-Fi): {base}/ops/payroll-control?business=Corner%20Deli&weekStart={week.isoformat()}",
-        "After you approve, tell Claude and the hours are entered in Payroll Relief (saved, not submitted);",
-        "then review and press Submit in Payroll Relief yourself.",
+        "When you press Approve & send (top of the page), the hours are entered in Payroll Relief within a few minutes.",
+        "If it isn't approved by 8:00 PM tonight it is approved and sent automatically, unless you press Hold",
+        "or something blocks it. AccountantsOffice may text you a sign-in code: type it in the box at the top of the page.",
         "",
         "Fixes made on the staging page only change this payroll; fix punches permanently in Rezku/production.",
     ]
@@ -199,6 +201,9 @@ def main():
         smtp.login(settings["SMTP_USER"], settings["SMTP_PASSWORD"])
         smtp.send_message(message)
     print(f"Emailed {to}: {message['Subject']}")
+    # Tells staging the owner was emailed: the 8 PM automatic approval only goes ahead after this summary.
+    status, body = cron_post(base, {"summarySent": {"weekStart": week.isoformat(), "sentAt": datetime.now(ZoneInfo("UTC")).isoformat()}})
+    print("summary recorded:", status, body[:80])
 
 
 if __name__ == "__main__":

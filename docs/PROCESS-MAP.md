@@ -241,8 +241,8 @@ flowchart LR
 | Schedule delivery (schedule texts/emails) | every 5 min | `corner-ops-cron-schedule-delivery.timer` |
 | Rezku repair | every 15 min (**remove at switch**) | — |
 | Ordering maintenance (print retries, abandoned reopens, terminal capture) | **not yet** (add at the switch; until then it runs only while a KDS is open) | `corner-ops-cron-maintenance.timer` (every minute) |
-| Interim Monday payroll email (until the switch) | 12:00 + 13:00 UTC Mondays → acts at 8 AM Eastern: `deploy/staging/monday-payroll-preview.sh` (fresh backup → staging → puts back the saved Payroll Relief employee list + matches, `staging/payroll-relief-{roster,matches}.json` → email owner; approve on staging) | — |
-| Missed clock-outs + Monday payroll (8 AM / 5 PM) | **not yet** | `deploy/systemd/corner-ops-cron-missed-clock-outs.timer` (every 15 min; in the repo but **not installed** as of 2026-10-24; install with `install-timers.sh`) |
+| Interim Monday payroll email (until the switch) | 12:00 + 13:00 UTC Mondays → acts at 8 AM Eastern: `deploy/staging/monday-payroll-preview.sh` (fresh backup → staging → puts back the saved Payroll Relief employee list + matches, `staging/payroll-relief-{roster,matches}.json` → email owner; records it on staging). The owner approves at the top of the staging payroll page; if not approved (or on Hold) by **8 PM Eastern Monday**, the price job's staging pass (`supplier-prices-sync.sh`, every 5 min) triggers staging's automatic approval, then enters each approved week in Payroll Relief (saved, never submitted) and emails the owner for the texted code and the result | — |
+| Missed clock-outs + Monday payroll (8 AM / 8 PM) | **not yet** | `deploy/systemd/corner-ops-cron-missed-clock-outs.timer` (every 15 min; in the repo but **not installed** as of 2026-10-24; install with `install-timers.sh`) |
 | Supplier price files + Sync now + website searches + payroll sends | — | `corner-ops-supplier-prices.timer` (every 5 min) |
 | Supplier website prices | — | `corner-ops-supplier-website.timer` (twice daily) |
 
@@ -260,9 +260,9 @@ flowchart TD
   sum --> d["Monday: draft for last week"]
   cmpw --> d
   d --> e8["08:00 Mon email to PAYROLL_NOTIFY_EMAIL<br/>hours, tips, what's off, blockers<br/>(waits for Sunday until 12:00)"]
-  e8 --> win{"Before 17:00:<br/>fixes / Hold?"}
-  win -->|Hold or blocked| ns["'Not sent at 5 PM' email<br/>owner approves on /ops/payroll-control"]
-  win -->|clear| a5["17:00 recalculate → approve & lock<br/>'Automatic 5 PM approval'"]
+  e8 --> win{"Before 20:00:<br/>fixes / Hold?"}
+  win -->|Hold or blocked| ns["'Not sent at 8 PM' email<br/>owner approves on /ops/payroll-control"]
+  win -->|clear| a5["20:00 recalculate → approve & lock<br/>'Automatic 8 PM approval'"]
   ns --> a5m["manual Approve & lock"]
   a5 --> q[(payroll_submissions)]
   a5m --> q
@@ -275,6 +275,7 @@ flowchart TD
 - Payroll website: AccountantsOffice → **Payroll Relief** (IRIS), employer *Mike's Corner Deli, LLC*,
   submission method *Excel Timesheet*. Columns filled: Reg, TipWa (tipped/driver hours),
   PCTip (tips incl. manual), OT. Salaried rows, Sick, SPOH, Overpay are never touched.
+- Approve & send, the texted-code box, Send again and Hold are in the first card of the payroll page (2026-11-13).
 - Employee matching (Corner Ops payroll name → Payroll Relief EE #) is on the payroll page.
 - Dry run (fills the file, uploads nothing): `supplier-prices-sync.sh --payroll-dry-run <weekStart>`.
 - Payroll Relief behaviour (seen on the real site, 2026-10-12, week 10/5–10/11):

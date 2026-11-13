@@ -51,7 +51,7 @@ import {
 /**
  * Monday payroll approval and the AccountantsOffice (Payroll Relief) queue.
  * 8:00 AM Monday: a freshly recalculated summary email (waits for Sunday's punches until noon).
- * 5:00 PM Monday: automatic approval unless the week is on Hold (payroll_week_holds) or blocked.
+ * 8:00 PM Monday: automatic approval unless the week is on Hold (payroll_week_holds) or blocked.
  * Approving is the existing lock (lockPayrollRun), refused while the week has
  * open punches or unresolved missed clock-outs. Each Corner Deli lock queues one
  * submission; the store server's job (deploy/supplier-scraper/payroll-relief.mjs)
@@ -626,7 +626,7 @@ function checkWeek(weekStart: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) throw new ValidationError("Choose a payroll week (its Monday, YYYY-MM-DD).");
 }
 
-/** Hold: the week is not approved automatically at 5 PM Monday. Manual approval still works. */
+/** Hold: the week is not approved automatically at 8 PM Monday. Manual approval still works. */
 export async function holdPayrollWeek(input: { business: Business; weekStart: string; actor: string }) {
   checkWeek(input.weekStart);
   if (input.business !== PAYROLL_RELIEF_BUSINESS) throw new ValidationError(DOCKS_NOT_SENT);
@@ -639,7 +639,7 @@ export async function holdPayrollWeek(input: { business: Business; weekStart: st
     ON CONFLICT (business, week_start) DO UPDATE SET held_by = EXCLUDED.held_by, held_at = NOW(), released_by = NULL, released_at = NULL
   `;
   await audit(input.business, "Payroll Put On Hold", input.weekStart, { weekStart: input.weekStart }, input.actor);
-  // The 5 PM approval may have just happened; say so rather than pretend the hold stopped it.
+  // The 8 PM approval may have just happened; say so rather than pretend the hold stopped it.
   const after = await latestRun(input.business, input.weekStart);
   return { held: true, alreadyApproved: after?.status === "Locked", hold: await activeHold(input.business, input.weekStart) };
 }
@@ -657,7 +657,7 @@ export async function releasePayrollWeek(input: { business: Business; weekStart:
   return { held: false };
 }
 
-/** For the payroll page: the 5 PM automatic send for this week, its hold, and what happened. */
+/** For the payroll page: the 8 PM automatic send for this week, its hold, and what happened. */
 export async function payrollAutoSendStatus(business: Business, weekStart: string, now = new Date()) {
   if (business !== PAYROLL_RELIEF_BUSINESS || !/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) return null;
   await ensurePayrollApprovalSchema();
@@ -683,7 +683,7 @@ export async function payrollAutoSendStatus(business: Business, weekStart: strin
 }
 
 // ---------------------------------------------------------------------------
-// Monday: 8 AM summary, 5 PM automatic approval
+// Monday: 8 AM summary, 8 PM automatic approval
 
 type RunRow = { id: string; version: number; status: "Draft" | "Locked"; payload: Record<string, unknown> & { rows?: WorkedRowInput[]; scheduleComparison?: ScheduleComparison[]; processingFeeReviewCount?: number } };
 
@@ -819,15 +819,26 @@ export async function sendMondaySummary(business: Business, weekStart: string, n
   }
 }
 
+/**
+ * The Monday summary was emailed by something other than sendMondaySummary (until the switch, staging's
+ * deploy/staging/monday-payroll-preview.py): record it, so the 8 PM automatic approval knows the owner was told.
+ */
+export async function recordMondaySummarySent(business: Business, weekStart: string, sentAt: Date) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart) || Number.isNaN(sentAt.getTime())) throw new ValidationError("Send weekStart (YYYY-MM-DD) and sentAt.");
+  await ensurePayrollApprovalSchema();
+  const recorded = await claimNotice(business, weekStart, "approval_request", { sentAt: sentAt.toISOString(), late: summaryWasLate(weekStart, sentAt), sundayMissing: false, by: "staging email" });
+  return { recorded };
+}
+
 /** The scheduler's Monday step (3 AM) and older callers: the summary, which waits for its 8 AM window. */
 export async function preparePayrollApproval(business: Business, weekStart: string) {
   return sendMondaySummary(business, weekStart);
 }
 
 /**
- * 5:00 PM Monday (window to Tuesday 11:59 PM), Corner Deli only, decided once per week: recalculate and
- * approve as "Automatic 5 PM approval" (which queues the AccountantsOffice submission), or, when on hold or
- * blocked, email once "Not sent at 5 PM: <reasons>".
+ * 8:00 PM Monday (window to Tuesday 11:59 PM), Corner Deli only, decided once per week: recalculate and
+ * approve as "Automatic 8 PM approval" (which queues the AccountantsOffice submission), or, when on hold or
+ * blocked, email once "Not sent at 8 PM: <reasons>".
  */
 export async function autoApprovePayrollWeek(business: Business, weekStart: string, now = new Date()) {
   if (business !== PAYROLL_RELIEF_BUSINESS) return { action: "not_sent_automatically" };
@@ -896,7 +907,7 @@ export async function autoApprovePayrollWeek(business: Business, weekStart: stri
 
 /**
  * Called every 15 minutes (with the missed clock-out check): the Monday summary for both businesses
- * (8 AM, or when Sunday's punches arrive, at the latest noon) and Corner Deli's 5 PM automatic approval.
+ * (8 AM, or when Sunday's punches arrive, at the latest noon) and Corner Deli's 8 PM automatic approval.
  */
 export async function catchUpPayrollApprovals(now = new Date()) {
   const weekStart = mondayJobWeek(now);

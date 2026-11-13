@@ -19,7 +19,7 @@ function authorized(request: Request): boolean {
  * still open an hour after close are closed at the scheduled end (else closing time) and marked for review;
  * Rezku punches clocked out an hour or more past the scheduled end become cases. The employee is texted
  * when they have SMS consent; the owner gets one email per business. Then Monday payroll: the 8 AM summary
- * and the 5 PM automatic approval. ?dryRun=1 lists what would happen without saving or sending anything.
+ * and the 8 PM automatic approval. ?dryRun=1 lists what would happen without saving or sending anything.
  */
 export async function GET(request: Request) {
   if (!process.env.CRON_SECRET?.trim()) return isoJson({ error: "CRON_SECRET is not configured." }, { status: 503 });
@@ -27,7 +27,7 @@ export async function GET(request: Request) {
   const dryRun = new URL(request.url).searchParams.get("dryRun") === "1";
   try {
     const clockOuts = await runMissedClockOutCheck({ dryRun });
-    // Monday payroll: the 8 AM summary and the 5 PM automatic approval (see catchUpPayrollApprovals).
+    // Monday payroll: the 8 AM summary and the 8 PM automatic approval (see catchUpPayrollApprovals).
     const payrollApproval = dryRun ? null : await catchUpPayrollApprovals().catch((error) => {
       console.error("[payroll-approval]", error);
       return { error: "Payroll approval could not be prepared." };

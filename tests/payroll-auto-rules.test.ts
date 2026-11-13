@@ -25,18 +25,18 @@ test("Monday times are Eastern and DST-correct", () => {
   assert.equal(iso(s.weekEnd), "2026-10-12T08:00:00.000Z");
   assert.equal(iso(s.summaryAt), "2026-10-12T12:00:00.000Z");
   assert.equal(iso(s.sundayFallbackAt), "2026-10-12T16:00:00.000Z");
-  assert.equal(iso(s.autoSendAt), "2026-10-12T21:00:00.000Z");
+  assert.equal(iso(s.autoSendAt), "2026-10-13T00:00:00.000Z");
   assert.equal(iso(s.windowEnd), "2026-10-14T04:00:00.000Z");
   assert.equal(iso(s.sundayStart), "2026-10-11T08:00:00.000Z");
   // Fall back (Nov 1, 2026): Monday Nov 2 is EST (UTC-5).
   const fall = payrollMondaySchedule("2026-10-26");
   assert.equal(iso(fall.summaryAt), "2026-11-02T13:00:00.000Z");
-  assert.equal(iso(fall.autoSendAt), "2026-11-02T22:00:00.000Z");
+  assert.equal(iso(fall.autoSendAt), "2026-11-03T01:00:00.000Z");
   // Sunday Nov 1 4 AM is still EST after the 2 AM change.
   assert.equal(iso(fall.sundayStart), "2026-11-01T09:00:00.000Z");
-  // Spring forward (2 AM Mar 8, 2026): Sunday 4 AM is already EDT; Monday Mar 9 5 PM is EDT.
+  // Spring forward (2 AM Mar 8, 2026): Sunday 4 AM is already EDT; Monday Mar 9 8 PM is EDT.
   const spring = payrollMondaySchedule("2026-03-02");
-  assert.equal(iso(spring.autoSendAt), "2026-03-09T21:00:00.000Z");
+  assert.equal(iso(spring.autoSendAt), "2026-03-10T00:00:00.000Z");
   assert.equal(iso(spring.summaryAt), "2026-03-09T12:00:00.000Z");
   assert.equal(iso(spring.sundayStart), "2026-03-08T08:00:00.000Z");
   assert.equal(iso(spring.sundayEnd), "2026-03-09T08:00:00.000Z");
@@ -65,9 +65,9 @@ test("8 AM summary: waits for Sunday's punches until noon, then sends with a war
   assert.equal(summaryDecision({ ...base, now: new Date("2026-10-14T04:00:00Z") }).action, "window_closed");
 });
 
-test("a summary that only went out at 3 PM or later doesn't lead to an automatic send", () => {
-  assert.equal(summaryWasLate(WEEK, new Date("2026-10-12T18:59:00Z")), false);
-  assert.equal(summaryWasLate(WEEK, new Date("2026-10-12T19:00:00Z")), true);
+test("a summary that only went out at 6 PM or later doesn't lead to an automatic send", () => {
+  assert.equal(summaryWasLate(WEEK, new Date("2026-10-12T21:59:00Z")), false);
+  assert.equal(summaryWasLate(WEEK, new Date("2026-10-12T22:00:00Z")), true);
   assert.equal(summaryWasLate(WEEK, null), false);
 });
 
@@ -76,18 +76,18 @@ const ready = {
   summarySentAt: new Date("2026-10-12T12:00:00Z"), sundayMissing: false, blockers: [] as string[], decided: false,
 };
 
-test("5 PM automatic send: window and DST", () => {
-  assert.equal(autoSendDecision({ ...ready, now: new Date("2026-10-12T20:59:00Z") }).action, "too_early");
-  assert.equal(autoSendDecision({ ...ready, now: new Date("2026-10-12T21:00:00Z") }).action, "approve");
+test("8 PM automatic send: window and DST", () => {
+  assert.equal(autoSendDecision({ ...ready, now: new Date("2026-10-12T23:59:00Z") }).action, "too_early");
+  assert.equal(autoSendDecision({ ...ready, now: new Date("2026-10-13T00:00:00Z") }).action, "approve");
   assert.equal(autoSendDecision({ ...ready, now: new Date("2026-10-14T03:59:00Z") }).action, "approve");
   assert.equal(autoSendDecision({ ...ready, now: new Date("2026-10-14T04:00:00Z") }).action, "window_closed");
   const fall = { ...ready, weekStart: "2026-10-26", summarySentAt: new Date("2026-11-02T13:00:00Z") };
-  assert.equal(autoSendDecision({ ...fall, now: new Date("2026-11-02T21:30:00Z") }).action, "too_early"); // 4:30 PM EST
-  assert.equal(autoSendDecision({ ...fall, now: new Date("2026-11-02T22:00:00Z") }).action, "approve");
+  assert.equal(autoSendDecision({ ...fall, now: new Date("2026-11-03T00:30:00Z") }).action, "too_early"); // 7:30 PM EST
+  assert.equal(autoSendDecision({ ...fall, now: new Date("2026-11-03T01:00:00Z") }).action, "approve");
 });
 
-test("5 PM automatic send: idempotent, hold and blockers", () => {
-  const now = new Date("2026-10-12T21:05:00Z");
+test("8 PM automatic send: idempotent, hold and blockers", () => {
+  const now = new Date("2026-10-13T00:05:00Z");
   assert.equal(autoSendDecision({ ...ready, now, decided: true }).action, "already_decided");
   assert.equal(autoSendDecision({ ...ready, now, latestStatus: "Locked" }).action, "already_approved");
   assert.deepEqual(autoSendDecision({ ...ready, now, heldBy: "owner@x.com" }), { action: "not_sent", reasons: ["it's on hold (by owner@x.com)"] });
@@ -97,8 +97,8 @@ test("5 PM automatic send: idempotent, hold and blockers", () => {
   assert.deepEqual(autoSendDecision({ ...ready, now, summarySentAt: null }).reasons, ["the 8 AM summary email wasn't sent"]);
   assert.deepEqual(autoSendDecision({ ...ready, now, sundayMissing: true }).reasons, ["sunday's hours haven't arrived yet"]);
   assert.deepEqual(autoSendDecision({ ...ready, now, everLocked: true }).reasons, ["it was approved and then reopened"]);
-  assert.match(autoSendDecision({ ...ready, now, summarySentAt: new Date("2026-10-12T19:30:00Z") }).reasons[0], /only went out at 3:30 PM/);
-  // No draft yet is fine: it's recalculated and drafted at 5 PM.
+  assert.match(autoSendDecision({ ...ready, now, summarySentAt: new Date("2026-10-12T22:30:00Z") }).reasons[0], /only went out at 6:30 PM/);
+  // No draft yet is fine: it's recalculated and drafted at 8 PM.
   assert.equal(autoSendDecision({ ...ready, now, latestStatus: null }).action, "approve");
 });
 
@@ -134,13 +134,13 @@ const emailBase = {
   holdLink: "https://team/ops/payroll-control?business=Corner%20Deli&weekStart=2026-10-05&hold=1",
 };
 
-test("Monday summary email: table, schedule, 5 PM line and links", () => {
+test("Monday summary email: table, schedule, 8 PM line and links", () => {
   const email = payrollMondaySummaryEmail(emailBase);
-  assert.equal(email.subject, "Corner Deli payroll 10/5–10/11: sends to AccountantsOffice at 5 PM");
+  assert.equal(email.subject, "Corner Deli payroll 10/5–10/11: sends to AccountantsOffice at 8 PM");
   assert.match(email.text, /^Corner Deli payroll, week of 10\/5–10\/11\. Draft v3 \(recalculated this morning\)\./);
   assert.match(email.text, /Employee \| Regular Hours \| Tipped Hours \| Tips/);
   assert.match(email.text, /What's off from the schedule:\n- Lillian/);
-  assert.match(email.text, /This will be sent to AccountantsOffice automatically at 5:00 PM today unless you put it on Hold or something blocks it\./);
+  assert.match(email.text, /This will be sent to AccountantsOffice automatically at 8:00 PM today unless you put it on Hold or something blocks it\./);
   assert.match(email.text, /Review: https:\/\/team\/ops\/payroll-control\?business=Corner%20Deli&weekStart=2026-10-05\n/);
   assert.match(email.text, /Hold \(opens the payroll page; press Hold there\): .*&hold=1$/);
   assert.doesNotMatch(email.text, /HAVEN'T ARRIVED/);
@@ -163,10 +163,10 @@ test("Monday summary email: Sunday warning, blockers, late, the Docks", () => {
   assert.equal(docks.subject, "Tiki payroll 10/5–10/11: ready to approve");
 });
 
-test("not-sent-at-5-PM email", () => {
+test("not-sent-at-8-PM email", () => {
   const email = autoSendSkippedEmail({ business: "Corner Deli", weekStart: WEEK, reasons: ["it's on hold (by chris)", "1 open punch"], link: "https://x" });
-  assert.equal(email.subject, "Corner Deli payroll 10/5–10/11 was not sent at 5 PM");
-  assert.match(email.text, /^Not sent at 5 PM: it's on hold \(by chris\); 1 open punch — approve on the payroll page when ready\./);
+  assert.equal(email.subject, "Corner Deli payroll 10/5–10/11 was not sent at 8 PM");
+  assert.match(email.text, /^Not sent at 8 PM: it's on hold \(by chris\); 1 open punch — approve on the payroll page when ready\./);
 });
 
 test("Submit is confirmed only when the week is no longer the open payroll, or listed as Approved", () => {

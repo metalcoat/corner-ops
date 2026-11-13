@@ -1,15 +1,18 @@
 import { isoJson } from "@/lib/timestamp-values";
 import { timingSafeEqual } from "node:crypto";
 import {
+  autoApprovePayrollWeek,
   claimPayrollSubmitPress,
   payrollSubmissionDetails,
   payrollSubmissionPreview,
+  recordMondaySummarySent,
   recordPayrollReliefRoster,
   recordPayrollSubmissionResult,
   takePayrollSubmissionCode,
   takePayrollSubmissions,
   PAYROLL_RELIEF_BUSINESS,
 } from "@/lib/payroll-approval";
+import { mondayJobWeek } from "@/lib/payroll-auto-rules";
 import type { HoursTotals, RosterEntry } from "@/lib/payroll-relief-timesheet";
 
 export const runtime = "nodejs";
@@ -65,6 +68,10 @@ export async function GET(request: Request) {
  *   { "id": "<submission id>", "submitPressing": true }   about to press Submit: answers { granted } and records
  *                                                         submit_pressed_at first; Submit is pressed only when granted
  *   { "id": "<submission id>", "status": "needs_code" | "submitted" | "sent" | "failed", "message": "...", "totals": { reg, tipHours, tips, ot } }
+ *   { "summarySent": { "weekStart": "YYYY-MM-DD", "sentAt": "<ISO>" } }   the Monday summary went out from elsewhere
+ *                                                         (staging, until the switch); Corner Deli
+ *   { "autoApprove": true }   Corner Deli's 8 PM Monday automatic approval for this Monday's week, if due
+ *                             (the same decision as the missed clock-out job's; for staging's send job)
  * "submitted" = saved in Payroll Relief for the owner to review and Submit; "sent" = Submit pressed and confirmed.
  * The owner is emailed when a code is needed, and once when it is saved, sent or failed.
  */
@@ -72,8 +79,13 @@ export async function POST(request: Request) {
   if (!process.env.CRON_SECRET?.trim()) return isoJson({ error: "CRON_SECRET is not configured." }, { status: 503 });
   if (!authorized(request)) return isoJson({ error: "Unauthorized." }, { status: 401 });
   try {
-    const body = (await request.json().catch(() => ({}))) as { id?: string; status?: string; message?: string; totals?: HoursTotals; roster?: RosterEntry[]; submitPressing?: boolean };
+    const body = (await request.json().catch(() => ({}))) as { id?: string; status?: string; message?: string; totals?: HoursTotals; roster?: RosterEntry[]; submitPressing?: boolean; summarySent?: { weekStart?: string; sentAt?: string }; autoApprove?: boolean };
     if (Array.isArray(body.roster)) return isoJson(await recordPayrollReliefRoster(PAYROLL_RELIEF_BUSINESS, body.roster));
+    if (body.summarySent) return isoJson(await recordMondaySummarySent(PAYROLL_RELIEF_BUSINESS, String(body.summarySent.weekStart || ""), new Date(String(body.summarySent.sentAt || ""))));
+    if (body.autoApprove === true) {
+      const weekStart = mondayJobWeek(new Date());
+      return isoJson({ weekStart, ...(await autoApprovePayrollWeek(PAYROLL_RELIEF_BUSINESS, weekStart)) });
+    }
     const id = String(body.id || "").trim();
     if (!id) return isoJson({ error: "Send the submission id." }, { status: 400 });
     if (body.submitPressing === true) {

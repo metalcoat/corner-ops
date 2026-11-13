@@ -1,7 +1,7 @@
 /**
  * Pure timing and decision rules for Monday payroll (Corner Deli):
  *   8:00 AM Eastern  the summary email (waits for Sunday's punches until 12:00 PM)
- *   5:00 PM Eastern  automatic approval, which queues the AccountantsOffice submission,
+ *   8:00 PM Eastern  automatic approval, which queues the AccountantsOffice submission,
  *                    unless the week is on Hold or something blocks it
  * plus the emails' wording. No database or network access here, so it is unit
  * tested directly. Payroll week = Monday 4 AM → next Monday 4 AM, America/New_York.
@@ -21,10 +21,10 @@ import {
 export const SUMMARY_HOUR = 8;
 /** If Sunday's punches haven't arrived, the summary waits until this hour, then goes out with a warning. */
 export const SUNDAY_FALLBACK_HOUR = 12;
-export const AUTO_SEND_HOUR = 17;
+export const AUTO_SEND_HOUR = 20;
 /** A summary that only went out at or after this hour (an outage) is too late to warn the owner, so nothing is sent automatically. */
-export const LATE_SUMMARY_HOUR = 15;
-export const AUTO_APPROVAL_ACTOR = "Automatic 5 PM approval";
+export const LATE_SUMMARY_HOUR = 18;
+export const AUTO_APPROVAL_ACTOR = "Automatic 8 PM approval";
 export const SUNDAY_MISSING_WARNING = "Sunday's hours haven't arrived yet";
 
 const minutes = (hour: number) => hour * 60;
@@ -87,7 +87,7 @@ export function summaryDecision(input: {
   return { action: "send", sundayMissing };
 }
 
-/** A summary sent at or after 3 PM Monday doesn't give the owner time to Hold, so that week isn't sent automatically. */
+/** A summary sent at or after 6 PM Monday doesn't give the owner time to Hold, so that week isn't sent automatically. */
 export function summaryWasLate(weekStart: string, sentAt: Date | null): boolean {
   return Boolean(sentAt && sentAt.getTime() >= payrollMondaySchedule(weekStart).lateSummaryAt.getTime());
 }
@@ -95,10 +95,10 @@ export function summaryWasLate(weekStart: string, sentAt: Date | null): boolean 
 export type AutoSendAction = "too_early" | "window_closed" | "already_decided" | "already_approved" | "approve" | "not_sent";
 
 /**
- * The 5:00 PM automatic approval (window Monday 5:00 PM → Tuesday 11:59 PM, decided once per week):
+ * The 8:00 PM automatic approval (window Monday 8:00 PM → Tuesday 11:59 PM, decided once per week):
  * approve when the latest version isn't already approved, the week isn't on hold, was never approved and
  * reopened, the 8 AM summary went out in time, Sunday's hours are in, and nothing blocks approval.
- * Otherwise "not_sent" with the reasons (emailed once). Manual approval before 5 PM simply wins.
+ * Otherwise "not_sent" with the reasons (emailed once). Manual approval before 8 PM simply wins.
  */
 export function autoSendDecision(input: {
   now: Date;
@@ -114,7 +114,7 @@ export function autoSendDecision(input: {
   sundayMissing: boolean;
   /** Approval blockers (open punches, missed clock-outs), already worded. */
   blockers: string[];
-  /** The 5 PM decision for this week was already made. */
+  /** The 8 PM decision for this week was already made. */
   decided: boolean;
 }): { action: AutoSendAction; reasons: string[] } {
   const s = payrollMondaySchedule(input.weekStart);
@@ -201,9 +201,9 @@ export function payrollMondaySummaryEmail(input: {
   /** Closed automatically, or late / unscheduled in Rezku: listed, not blocking. */
   clockOutsToCheck?: number;
   sundayMissing: boolean;
-  /** Corner Deli: sent to AccountantsOffice automatically at 5 PM. */
+  /** Corner Deli: sent to AccountantsOffice automatically at 8 PM. */
   autoSend: boolean;
-  /** The email is going out at or after 3 PM (an outage): no automatic send this week. */
+  /** The email is going out at or after 6 PM (an outage): no automatic send this week. */
   late: boolean;
   reviewLink: string;
   holdLink: string;
@@ -219,8 +219,8 @@ export function payrollMondaySummaryEmail(input: {
   const blocked = input.blockers.length > 0 || input.sundayMissing || "error" in input.draft;
   const sendLines: string[] = [];
   if (input.autoSend && !input.late) {
-    sendLines.push("This will be sent to AccountantsOffice automatically at 5:00 PM today unless you put it on Hold or something blocks it.");
-    if (blocked) sendLines.push("Right now something blocks it (see above): fix it before 5:00 PM, or approve on the payroll page when ready.");
+    sendLines.push("This will be sent to AccountantsOffice automatically at 8:00 PM today unless you put it on Hold or something blocks it.");
+    if (blocked) sendLines.push("Right now something blocks it (see above): fix it before 8:00 PM, or approve on the payroll page when ready.");
   } else if (input.autoSend) {
     sendLines.push("This summary went out late, so it won't be sent to AccountantsOffice automatically today. Approve it on the payroll page when ready.");
   } else {
@@ -228,7 +228,7 @@ export function payrollMondaySummaryEmail(input: {
   }
   const subjectState = input.sundayMissing
     ? SUNDAY_MISSING_WARNING
-    : blocked ? "needs attention" : input.autoSend && !input.late ? "sends to AccountantsOffice at 5 PM" : "ready to approve";
+    : blocked ? "needs attention" : input.autoSend && !input.late ? "sends to AccountantsOffice at 8 PM" : "ready to approve";
   return {
     subject: `${input.business} payroll ${week}: ${subjectState}`,
     text: [
@@ -255,13 +255,13 @@ export function payrollMondaySummaryEmail(input: {
   };
 }
 
-/** Sent once when the 5 PM automatic send didn't happen. */
+/** Sent once when the 8 PM automatic send didn't happen. */
 export function autoSendSkippedEmail(input: { business: Business; weekStart: string; reasons: string[]; link: string }): { subject: string; text: string } {
   const week = payrollWeekLabel(input.weekStart);
   return {
-    subject: `${input.business} payroll ${week} was not sent at 5 PM`,
+    subject: `${input.business} payroll ${week} was not sent at 8 PM`,
     text: [
-      `Not sent at 5 PM: ${input.reasons.join("; ")} — approve on the payroll page when ready.`,
+      `Not sent at 8 PM: ${input.reasons.join("; ")} — approve on the payroll page when ready.`,
       "",
       `Payroll page: ${input.link}`,
     ].join("\n"),

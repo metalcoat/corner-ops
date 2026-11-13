@@ -160,4 +160,53 @@ while IFS= read -r submission_id; do
   fi
 done <<< "$payroll_ids"
 
+# Until the switch, Corner Deli payroll is approved on staging (deploy/staging/monday-payroll-preview.sh refreshes it
+# Mondays at 8 AM). Same as above against staging: its 8 PM Monday automatic approval (if not approved or on Hold by
+# then), then each approved week is entered in Payroll Relief, saved and never submitted. Staging can't email, so the
+# owner is emailed here when AccountantsOffice texts a code and when the entry is done.
+readonly STAGING_ENV="$ROOT/staging/.env"
+staging_secret="$(grep -E '^[[:space:]]*CRON_SECRET[[:space:]]*=' "$STAGING_ENV" 2>/dev/null | tail -n 1 | cut -d= -f2- | sed -E -e 's/\r$//' -e 's/^"(.*)"$/\1/' -e "s/^'(.*)'$/\1/" || true)"
+staging_url="http://$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p'):3002"
+staging_cron() { curl -fsS --max-time 120 -H @<(printf 'Authorization: Bearer %s\n' "$staging_secret") "$@"; }
+staging_status() {
+  staging_cron "$staging_url/api/cron/payroll-submissions?submission=$1" 2>/dev/null \
+    | python3 -c 'import json,sys; s=json.load(sys.stdin).get("submission") or {}; print(s.get("status",""), s.get("message","").replace("\n"," "), sep="\t")' 2>/dev/null || true
+}
+owner_email() { python3 "$ROOT/runtime/deploy/send-alert-email.py" "$1" >/dev/null 2>&1 <<< "$2" || true; }
+if [[ -n "$staging_secret" ]] && curl -fsS --max-time 10 "$staging_url/api/health" >/dev/null 2>&1; then
+  approve="$(staging_cron -H 'content-type: application/json' --data-binary '{"autoApprove":true}' "$staging_url/api/cron/payroll-submissions" 2>/dev/null || true)"
+  case "$approve" in *'"action":"approved"'*|*'"action":"not_sent"'*) printf '%s Staging payroll 8 PM: %s\n' "$(date -u +%FT%TZ)" "$approve" ;; esac
+  case "$approve" in *'"action":"not_sent"'*)
+    owner_email "Corner Deli payroll was NOT sent at 8 PM" "$(printf 'The automatic 8 PM approval did not go ahead: %s\n\nApprove on the payroll page when ready (deli Wi-Fi): %s/ops/payroll-control?business=Corner%%20Deli\n' \
+      "$(python3 -c 'import json,sys; print("; ".join(json.loads(sys.argv[1]).get("reasons") or []))' "$approve" 2>/dev/null)" "$staging_url")" ;;
+  esac
+  staging_ids="$(staging_cron "$staging_url/api/cron/payroll-submissions?submissions=1" 2>/dev/null \
+    | python3 -c 'import json,sys,re; [print(s["id"]) for s in json.load(sys.stdin).get("submissions", []) if re.fullmatch(r"[0-9a-f-]{36}", str(s.get("id","")))]' 2>/dev/null || true)"
+  while IFS= read -r submission_id; do
+    [[ -n "$submission_id" ]] || continue
+    printf '%s Payroll Relief (staging): %s\n' "$(date -u +%FT%TZ)" "$submission_id"
+    page="$staging_url/ops/payroll-control?business=Corner%20Deli"
+    # Watch for "needs_code" while the job runs, and email the owner once.
+    ( for _ in $(seq 1 90); do
+        sleep 10
+        if [[ "$(staging_status "$submission_id")" == needs_code* ]]; then
+          owner_email "Payroll: type the AccountantsOffice code" "$(printf 'AccountantsOffice just texted you a sign-in code for payroll.\nType it in the box at the top of the payroll page within 10 minutes (deli Wi-Fi):\n%s\n' "$page")"
+          break
+        fi
+      done ) &
+    watcher=$!
+    if ! payroll -e "SUBMISSION_ID=$submission_id" -e "APP_INTERNAL_URL=$staging_url" -e "CRON_SECRET=$staging_secret" -e PAYROLL_RELIEF_AUTO_SUBMIT=0; then
+      status=1
+      body="$(python3 -c 'import json,sys; print(json.dumps({"id": sys.argv[1], "status": "failed", "message": "The payroll job on the store server could not run (see the supplier prices log). Press Send again."}))' "$submission_id")"
+      staging_cron -H 'content-type: application/json' --data-binary "$body" "$staging_url/api/cron/payroll-submissions" >/dev/null 2>&1 || true
+    fi
+    kill "$watcher" 2>/dev/null || true
+    result="$(staging_status "$submission_id")"
+    case "$result" in
+      submitted*|sent*) owner_email "Payroll entered in Payroll Relief" "$(printf 'Corner Deli payroll was entered in Payroll Relief: %s\n\nReview it there and press Submit to send it to the accountant.\n' "${result#*$'\t'}")" ;;
+      *) owner_email "Payroll did NOT reach Payroll Relief" "$(printf 'Corner Deli payroll could not be entered in Payroll Relief: %s\n\nPress Send again at the top of the payroll page (deli Wi-Fi): %s\n' "${result#*$'\t'}" "$page")" ;;
+    esac
+  done <<< "$staging_ids"
+fi
+
 exit "$status"

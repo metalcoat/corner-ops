@@ -257,6 +257,7 @@ export default function PayrollControlPage() {
   }, [session?.authenticated, business, weekStart]);
 
   // While the store server is entering payroll (or waiting for a texted code), keep the status current.
+  const approval = data?.approval;
   const working = Boolean(data?.approval && [...data.approval.submissions, ...(data.approval.payrollRelief?.rosterCheck ? [data.approval.payrollRelief.rosterCheck] : [])]
     .some((item) => item.status === "submitting" || item.status === "needs_code" || item.status === "queued"));
   useEffect(() => {
@@ -290,6 +291,10 @@ export default function PayrollControlPage() {
       </span>}
       {submission.kind !== "roster" && (submission.status === "failed" || submission.status === "submitted") && !submission.submitPressedAt && <> <button disabled={busy} onClick={() => void post({ action: "submission-retry", business, id: submission.id }).then(() => setNotice("Queued to enter in Payroll Relief again.")).catch(() => undefined)}>Send again</button></>}
     </>;
+  }
+
+  function approve(version: Version) {
+    void post({ action: "run-lock", business, id: version.id }).then((result) => setNotice(result?.submission ? `Payroll v${version.version} approved and locked. The store server will enter it in Payroll Relief within a few minutes.` : `Payroll v${version.version} approved and locked. ${result?.submissionNote || ""}`)).catch(() => undefined);
   }
 
   async function post(body: Record<string, unknown>) {
@@ -458,6 +463,43 @@ export default function PayrollControlPage() {
     {notice && <div className="noticeBar">{notice}</div>}
 
     <div className="controlGrid">
+      {approval && (() => {
+        // What gets this week to the accountant, at the top so it's never hunted for: approve (which queues the
+        // Payroll Relief entry), the sign-in code box, Send again, and the 8 PM automatic send with Hold.
+        const weekVersions = (data?.versions || []).filter((version) => String(version.weekStart).slice(0, 10) === weekStart);
+        const latest = weekVersions.reduce<Version | null>((best, version) => !best || version.version > best.version ? version : best, null);
+        const submission = latest ? approval.submissions.find((item) => item.payrollRunVersionId === latest.id) : undefined;
+        const sends = Boolean(approval.sendsToPayrollRelief);
+        return <section className="controlCard">
+          <p className="eyebrow">{sends ? "Send to the accountant · AccountantsOffice / Payroll Relief" : "Approve this week"}</p>
+          <h2>{!latest ? "No payroll draft for this week yet"
+            : latest.status === "Locked" ? `v${latest.version} approved${latest.lockedBy ? ` by ${latest.lockedBy}` : ""}`
+            : approval.blockers.message ? "Not ready to approve" : `Draft v${latest.version} ready to approve`}</h2>
+          {approval.blockers.message && latest?.status !== "Locked" && <p className="reportNote"><span className="badge warn">Blocked</span> {approval.blockers.message} (details under Approval below)</p>}
+          <div className="controlActions">
+            {!latest && <button className="primary" disabled={busy} onClick={() => void post({ action: "draft-create", business, weekStart }).then((result) => setNotice(`Payroll draft version ${result.version} created from the current corrected totals.`)).catch(() => undefined)}>Create payroll draft</button>}
+            {latest?.status === "Draft" && <button className="primary" disabled={busy || Boolean(approval.blockers.message)} title={approval.blockers.message || ""} onClick={() => approve(latest)}>{sends ? `Approve & send v${latest.version} to accountant` : `Approve & lock v${latest.version}`}</button>}
+            {submission && <span>{submission.statusLine} {submissionControls(submission)}</span>}
+            {latest?.status === "Locked" && sends && !submission && <span>Not queued for Payroll Relief.</span>}
+          </div>
+          {sends && latest?.status === "Locked" && submission?.status === "submitted" && <p className="reportNote">Saved in Payroll Relief: review it there and press Submit to send it to the accountant.</p>}
+          {approval.autoSend && (() => {
+            const auto = approval.autoSend;
+            const when = new Intl.DateTimeFormat("en-US", { timeZone: EASTERN_TIME_ZONE, weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(auto.sendAt));
+            if (auto.outcome === "approved") return <p className="reportNote"><span className="badge good">Sent automatically</span> Approved at 8:00 PM Monday and queued for AccountantsOffice.</p>;
+            if (auto.outcome === "not_sent") return <p className="reportNote"><span className="badge warn">Not sent at 8 PM</span> {auto.reasons.join("; ")}. Approve above when ready.</p>;
+            if (!auto.pending) return null;
+            return <div id="hold" className="controlActions" style={holdRequested ? { outline: "2px solid currentColor", padding: 8, borderRadius: 8 } : undefined}>
+              {auto.hold
+                ? <><span><span className="badge warn">On hold</span> On hold by {auto.hold.heldBy} — it won&apos;t be sent automatically.</span>
+                  <button disabled={busy} onClick={() => void post({ action: "week-release", business, weekStart }).then(() => setNotice("Released: it will be sent automatically at 8:00 PM Monday unless something blocks it.")).catch(() => undefined)}>Release</button></>
+                : <><span>Automatic send at 8:00 PM Monday ({when}){holdRequested ? " — press Hold to stop it" : ""}</span>
+                  <button className={holdRequested ? "primary" : ""} disabled={busy} onClick={() => void post({ action: "week-hold", business, weekStart }).then((result) => { setHoldRequested(false); setNotice(result?.alreadyApproved ? "On hold, but it was already approved. Reopen it as a new version to stop the submission." : "On hold: it won't be sent automatically. Approve it yourself when ready."); }).catch(() => undefined)}>Hold</button></>}
+            </div>;
+          })()}
+        </section>;
+      })()}
+
       <section className="controlCard">
         <div className="metricGrid">
           <div className="metric"><span>Total hours</span><strong>{hours(totals.hours)}</strong></div>
@@ -586,20 +628,6 @@ export default function PayrollControlPage() {
             : "Approving a draft locks it. The Docks isn't sent to AccountantsOffice automatically."}</p>}
         {Boolean(data.approval.blockers.needsReview) && <p className="reportNote">{data.approval.blockers.needsReview} punch(es) this week are marked Needs Review.</p>}
         {Boolean(data.approval.blockers.clockOutsToCheck) && <p className="reportNote">{data.approval.blockers.clockOutsToCheck} clock-out(s) to check (closed automatically, or late in Rezku). They don&apos;t block approval.</p>}
-        {data.approval.autoSend && (() => {
-          const auto = data.approval.autoSend;
-          const when = new Intl.DateTimeFormat("en-US", { timeZone: EASTERN_TIME_ZONE, weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(auto.sendAt));
-          if (auto.outcome === "approved") return <p className="reportNote"><span className="badge good">Sent automatically</span> Approved at 5:00 PM Monday and queued for AccountantsOffice.</p>;
-          if (auto.outcome === "not_sent") return <p className="reportNote"><span className="badge warn">Not sent at 5 PM</span> {auto.reasons.join("; ")}. Approve below when ready.</p>;
-          if (!auto.pending) return null;
-          return <div id="hold" className="controlActions" style={holdRequested ? { outline: "2px solid currentColor", padding: 8, borderRadius: 8 } : undefined}>
-            {auto.hold
-              ? <><span><span className="badge warn">On hold</span> On hold by {auto.hold.heldBy} — it won&apos;t be sent automatically.</span>
-                <button disabled={busy} onClick={() => void post({ action: "week-release", business, weekStart }).then(() => setNotice("Released: it will be sent automatically at 5:00 PM Monday unless something blocks it.")).catch(() => undefined)}>Release</button></>
-              : <><span>Automatic send at 5:00 PM Monday ({when}){holdRequested ? " — press Hold to stop it" : ""}</span>
-                <button className={holdRequested ? "primary" : ""} disabled={busy} onClick={() => void post({ action: "week-hold", business, weekStart }).then((result) => { setHoldRequested(false); setNotice(result?.alreadyApproved ? "On hold, but it was already approved. Reopen it as a new version to stop the submission." : "On hold: it won't be sent automatically. Approve it yourself when ready."); }).catch(() => undefined)}>Hold</button></>}
-          </div>;
-        })()}
         {data.approval.clockOutCases.length > 0 && <div className="list">{data.approval.clockOutCases.map((item) => <div className="listItem" key={item.id}>
           <div><strong>{item.employeeName} · {item.status === "Submitted" ? `says they left ${item.employeeLeftAtEastern}` : item.status === "Resolved" ? `clocked out ${item.resolvedClockOutEastern || ""}` : item.kindLabel && item.kind !== "open_punch" ? `${item.kindLabel}${item.punchClockOutEastern ? ` (${item.punchClockOutEastern})` : ""}` : "still clocked in"}</strong><span>In {item.clockInEastern} · scheduled end {item.scheduledEndEastern || "none"} · {item.smsLabel}</span></div>
           {item.status === "Resolved" ? <span className="badge good">Settled</span> : <a href={`/ops/payroll-control/clock-outs?case=${encodeURIComponent(item.id)}`}>Choose clock-out</a>}
@@ -611,7 +639,7 @@ export default function PayrollControlPage() {
         <h2>Versions</h2>
         <div className="tableWrap"><table className="controlTable">
           <thead><tr><th>Week</th><th>Version</th><th>Status</th><th>Generated</th><th>Locked</th><th>Actions</th></tr></thead>
-          <tbody>{data?.versions.map((version) => <tr key={version.id}><td>{version.weekStart}</td><td>v{version.version}</td><td><span className={`badge ${version.status === "Locked" ? "good" : "warn"}`}>{version.status}</span></td><td>{version.generatedBy}<small>{easternDateTime(version.generatedAt)}</small></td><td>{version.lockedBy || "—"}</td><td><a href={`/api/payroll-control?export=${version.id}`}>CSV</a> {version.status === "Draft" ? <button disabled={busy || (String(version.weekStart).slice(0, 10) === weekStart && Boolean(data?.approval?.blockers.message))} title={String(version.weekStart).slice(0, 10) === weekStart ? data?.approval?.blockers.message || "" : ""} onClick={() => void post({ action: "run-lock", business, id: version.id }).then((result) => setNotice(result?.submission ? `Payroll v${version.version} approved and locked. The store server will enter it in Payroll Relief within a few minutes.` : `Payroll v${version.version} approved and locked. ${result?.submissionNote || ""}`)).catch(() => undefined)}>Approve & lock</button> : <button onClick={() => void post({ action: "run-reopen", business, id: version.id }).then((result) => setNotice(`Reopened as payroll draft v${result.version}.`))}>Reopen as new version</button>}{(() => {
+          <tbody>{data?.versions.map((version) => <tr key={version.id}><td>{version.weekStart}</td><td>v{version.version}</td><td><span className={`badge ${version.status === "Locked" ? "good" : "warn"}`}>{version.status}</span></td><td>{version.generatedBy}<small>{easternDateTime(version.generatedAt)}</small></td><td>{version.lockedBy || "—"}</td><td><a href={`/api/payroll-control?export=${version.id}`}>CSV</a> {version.status === "Draft" ? <button disabled={busy || (String(version.weekStart).slice(0, 10) === weekStart && Boolean(data?.approval?.blockers.message))} title={String(version.weekStart).slice(0, 10) === weekStart ? data?.approval?.blockers.message || "" : ""} onClick={() => approve(version)}>Approve & lock</button> : <button onClick={() => void post({ action: "run-reopen", business, id: version.id }).then((result) => setNotice(`Reopened as payroll draft v${result.version}.`))}>Reopen as new version</button>}{(() => {
             const submission = data?.approval?.submissions.find((item) => item.payrollRunVersionId === version.id);
             if (!submission) return null;
             return <small>{submission.statusLine} {submissionControls(submission)}</small>;
